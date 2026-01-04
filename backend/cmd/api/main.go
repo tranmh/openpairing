@@ -13,6 +13,7 @@ import (
 	"github.com/openpairing/openpairing/internal/config"
 	"github.com/openpairing/openpairing/internal/database"
 	"github.com/openpairing/openpairing/internal/middleware"
+	"github.com/openpairing/openpairing/internal/player"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -39,8 +40,13 @@ func main() {
 	authHandler := auth.NewHandler(authService)
 	authMiddleware := auth.NewMiddleware(auth.NewJWTService(&cfg.JWT))
 
+	// Player service
+	playerRepo := player.NewRepository(db.Pool)
+	playerService := player.NewService(playerRepo, log.Logger)
+	playerHandler := player.NewHandler(playerService)
+
 	// Create Gin router
-	router := setupRouter(cfg, authHandler, authMiddleware)
+	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler)
 
 	// Create server
 	srv := &http.Server{
@@ -76,7 +82,7 @@ func main() {
 	log.Info().Msg("Server exited")
 }
 
-func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware) *gin.Engine {
+func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler) *gin.Engine {
 	// Set Gin mode
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -115,17 +121,15 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 		}
 
 		// Player routes
-		players := v1.Group("/players")
-		players.Use(middleware.APIRateLimit())
+		playerHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireAdmin())
+
+		// Federation import routes (admin only)
+		fedImport := v1.Group("/players")
+		fedImport.Use(middleware.APIRateLimit(), authMiddleware.Authenticate(), authMiddleware.RequireAdmin())
 		{
-			players.GET("", notImplemented)
-			players.GET("/:id", notImplemented)
-			players.POST("", authMiddleware.Authenticate(), authMiddleware.RequireAdmin(), notImplemented)
-			players.PUT("/:id", authMiddleware.Authenticate(), notImplemented)
-			players.GET("/:id/history", notImplemented)
-			players.POST("/import/fide", authMiddleware.Authenticate(), authMiddleware.RequireAdmin(), notImplemented)
-			players.POST("/import/dsb", authMiddleware.Authenticate(), authMiddleware.RequireAdmin(), notImplemented)
-			players.POST("/search-federation", authMiddleware.Authenticate(), notImplemented)
+			fedImport.POST("/import/fide", notImplemented)
+			fedImport.POST("/import/dsb", notImplemented)
+			fedImport.POST("/search-federation", notImplemented)
 		}
 
 		// Tournament routes
