@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/openpairing/openpairing/internal/analytics"
 	"github.com/openpairing/openpairing/internal/auth"
 	"github.com/openpairing/openpairing/internal/config"
 	"github.com/openpairing/openpairing/internal/database"
@@ -18,6 +19,7 @@ import (
 	"github.com/openpairing/openpairing/internal/federation/oesb"
 	"github.com/openpairing/openpairing/internal/federation/ssb"
 	"github.com/openpairing/openpairing/internal/middleware"
+	"github.com/openpairing/openpairing/internal/notification"
 	"github.com/openpairing/openpairing/internal/player"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -89,8 +91,17 @@ func main() {
 		PlayerRepo:    playerRepo,
 	}, log.Logger)
 
+	// Analytics service
+	analyticsService := analytics.NewService(db.Pool, log.Logger)
+	analyticsHandler := analytics.NewHandler(analyticsService, log.Logger)
+
+	// Notification service
+	notificationRepo := notification.NewRepository(db.Pool)
+	notificationService := notification.NewService(notificationRepo, log.Logger)
+	notificationHandler := notification.NewHandler(notificationService, log.Logger)
+
 	// Create Gin router
-	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler)
+	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler)
 
 	// Create server
 	srv := &http.Server{
@@ -144,7 +155,7 @@ func main() {
 	log.Info().Msg("Server exited")
 }
 
-func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler) *gin.Engine {
+func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler) *gin.Engine {
 	// Set Gin mode
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -187,6 +198,12 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 
 		// Federation routes
 		federationHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireAdmin())
+
+		// Analytics routes
+		analyticsHandler.RegisterRoutes(v1)
+
+		// Notification routes
+		notificationHandler.RegisterRoutes(v1)
 
 		// Tournament routes
 		tournaments := v1.Group("/tournaments")
