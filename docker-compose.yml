@@ -1,0 +1,140 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: openpairing-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-openpairing}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openpairing_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-openpairing}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openpairing}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: openpairing-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO (S3-compatible storage for development)
+  minio:
+    image: minio/minio:latest
+    container_name: openpairing-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Backend API (Go)
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: openpairing-api
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-openpairing}:${POSTGRES_PASSWORD:-openpairing_dev}@postgres:5432/${POSTGRES_DB:-openpairing}?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - full
+
+  # Chess Server (WebSocket)
+  chess-server:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.chess
+    container_name: openpairing-chess
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+    ports:
+      - "${CHESS_PORT:-8081}:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - full
+
+  # Worker Service (Background Jobs)
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    container_name: openpairing-worker
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-openpairing}:${POSTGRES_PASSWORD:-openpairing_dev}@postgres:5432/${POSTGRES_DB:-openpairing}?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - full
+
+  # Frontend (Next.js) - Development
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: openpairing-frontend
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:${API_PORT:-8080}
+      - NEXT_PUBLIC_WS_URL=ws://localhost:${CHESS_PORT:-8081}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - api
+    profiles:
+      - full
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  default:
+    name: openpairing-network

@@ -1,0 +1,286 @@
+/**
+ * API client for OpenPairing backend
+ */
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
+
+interface ApiError {
+  message: string;
+  code?: string;
+  details?: Record<string, string[]>;
+}
+
+interface ApiResponse<T> {
+  data?: T;
+  error?: ApiError;
+  status: number;
+}
+
+class ApiClient {
+  private baseUrl: string;
+  private accessToken: string | null = null;
+
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl;
+  }
+
+  setAccessToken(token: string | null) {
+    this.accessToken = token;
+  }
+
+  private async request<T>(
+    method: string,
+    path: string,
+    options?: {
+      body?: unknown;
+      params?: Record<string, string>;
+      headers?: Record<string, string>;
+    }
+  ): Promise<ApiResponse<T>> {
+    let url = `${this.baseUrl}${path}`;
+
+    if (options?.params) {
+      const searchParams = new URLSearchParams(options.params);
+      url += `?${searchParams.toString()}`;
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    };
+
+    if (this.accessToken) {
+      headers['Authorization'] = `Bearer ${this.accessToken}`;
+    }
+
+    try {
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: options?.body ? JSON.stringify(options.body) : undefined,
+        credentials: 'include',
+      });
+
+      const status = response.status;
+
+      if (status === 204) {
+        return { status };
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return {
+          status,
+          error: {
+            message: data.error || data.message || 'An error occurred',
+            code: data.code,
+            details: data.details,
+          },
+        };
+      }
+
+      return { data, status };
+    } catch (error) {
+      return {
+        status: 0,
+        error: {
+          message: error instanceof Error ? error.message : 'Network error',
+          code: 'NETWORK_ERROR',
+        },
+      };
+    }
+  }
+
+  // Generic HTTP methods
+  get<T>(path: string, params?: Record<string, string>) {
+    return this.request<T>('GET', path, { params });
+  }
+
+  post<T>(path: string, body?: unknown) {
+    return this.request<T>('POST', path, { body });
+  }
+
+  put<T>(path: string, body?: unknown) {
+    return this.request<T>('PUT', path, { body });
+  }
+
+  patch<T>(path: string, body?: unknown) {
+    return this.request<T>('PATCH', path, { body });
+  }
+
+  delete<T>(path: string) {
+    return this.request<T>('DELETE', path);
+  }
+}
+
+// Singleton instance
+export const api = new ApiClient(API_BASE_URL);
+
+// Type definitions for API responses
+export interface User {
+  id: string;
+  email: string;
+  role: 'player' | 'arbiter' | 'organizer' | 'admin';
+  preferredLanguage: string;
+  createdAt: string;
+}
+
+export interface Player {
+  id: string;
+  userId?: string;
+  firstName: string;
+  lastName: string;
+  birthDate?: string;
+  gender?: string;
+  fideId?: string;
+  dsbId?: string;
+  oesbId?: string;
+  fideStandard?: number;
+  fideRapid?: number;
+  fideBlitz?: number;
+  dwz?: number;
+  dwzIndex?: number;
+  oesbElo?: number;
+  fideTitle?: string;
+  nationalTitle?: string;
+  clubId?: string;
+  federation?: string;
+}
+
+export interface Tournament {
+  id: string;
+  organizationId?: string;
+  name: string;
+  description?: string;
+  slug: string;
+  type: 'swiss' | 'round_robin' | 'knockout' | 'team_swiss';
+  mode: 'otb' | 'online' | 'hybrid';
+  timeControl?: string;
+  timeControlType?: 'standard' | 'rapid' | 'blitz';
+  pairingEngine: 'javafo' | 'bbp';
+  pairingSystem: 'dutch' | 'burstein' | 'dubov';
+  startDate: string;
+  endDate?: string;
+  rounds: number;
+  maxPlayers?: number;
+  status: 'draft' | 'published' | 'registration' | 'ongoing' | 'completed' | 'cancelled';
+  fideRated: boolean;
+  dwzRated: boolean;
+  oesbRated: boolean;
+  tiebreaks: string[];
+}
+
+export interface TournamentParticipant {
+  id: string;
+  tournamentId: string;
+  playerId: string;
+  player?: Player;
+  registrationStatus: 'registered' | 'confirmed' | 'withdrawn' | 'expelled';
+  startRank?: number;
+  startingRating?: number;
+  points: number;
+  buchholz: number;
+  buchholzCut1: number;
+  sonnebornBerger: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  isActive: boolean;
+}
+
+export interface Game {
+  id: string;
+  tournamentId: string;
+  roundId: string;
+  boardNumber: number;
+  whiteParticipantId?: string;
+  blackParticipantId?: string;
+  whiteParticipant?: TournamentParticipant;
+  blackParticipant?: TournamentParticipant;
+  result?: string;
+  whiteScore?: number;
+  blackScore?: number;
+  status: 'scheduled' | 'ongoing' | 'completed' | 'adjourned';
+  pgn?: string;
+}
+
+export interface TournamentRound {
+  id: string;
+  tournamentId: string;
+  roundNumber: number;
+  scheduledStart?: string;
+  actualStart?: string;
+  completedAt?: string;
+  status: 'pending' | 'pairing' | 'paired' | 'ongoing' | 'completed';
+}
+
+// Auth API
+export const authApi = {
+  register: (data: { email: string; password: string; firstName: string; lastName: string }) =>
+    api.post<{ user: User }>('/auth/register', data),
+
+  login: (email: string, password: string) =>
+    api.post<{ user: User; accessToken: string; refreshToken: string }>('/auth/login', {
+      email,
+      password,
+    }),
+
+  logout: () => api.post('/auth/logout'),
+
+  refreshToken: () => api.post<{ accessToken: string }>('/auth/refresh'),
+
+  forgotPassword: (email: string) => api.post('/auth/forgot-password', { email }),
+
+  resetPassword: (token: string, password: string) =>
+    api.post('/auth/reset-password', { token, password }),
+};
+
+// Players API
+export const playersApi = {
+  search: (query: string, params?: { federation?: string; minRating?: number; maxRating?: number }) =>
+    api.get<{ players: Player[]; total: number }>('/players', { q: query, ...params } as Record<string, string>),
+
+  get: (id: string) => api.get<Player>(`/players/${id}`),
+
+  getHistory: (id: string) => api.get<{ history: { date: string; rating: number; type: string }[] }>(`/players/${id}/history`),
+
+  searchFederation: (query: string, federation: 'fide' | 'dsb' | 'oesb') =>
+    api.post<{ players: Player[] }>('/players/search-federation', { query, federation }),
+};
+
+// Tournaments API
+export const tournamentsApi = {
+  list: (params?: { status?: string; page?: number; limit?: number }) =>
+    api.get<{ tournaments: Tournament[]; total: number }>('/tournaments', params as Record<string, string>),
+
+  get: (id: string) => api.get<Tournament>(`/tournaments/${id}`),
+
+  create: (data: Partial<Tournament>) => api.post<Tournament>('/tournaments', data),
+
+  update: (id: string, data: Partial<Tournament>) => api.put<Tournament>(`/tournaments/${id}`, data),
+
+  delete: (id: string) => api.delete(`/tournaments/${id}`),
+
+  getParticipants: (id: string) =>
+    api.get<{ participants: TournamentParticipant[] }>(`/tournaments/${id}/participants`),
+
+  register: (id: string, playerId: string) =>
+    api.post<TournamentParticipant>(`/tournaments/${id}/participants`, { playerId }),
+
+  getRounds: (id: string) => api.get<{ rounds: TournamentRound[] }>(`/tournaments/${id}/rounds`),
+
+  getPairings: (id: string, roundNumber: number) =>
+    api.get<{ pairings: Game[] }>(`/tournaments/${id}/rounds/${roundNumber}/pairings`),
+
+  generatePairings: (id: string, roundNumber: number) =>
+    api.post<{ pairings: Game[] }>(`/tournaments/${id}/rounds/${roundNumber}/pair`),
+
+  getStandings: (id: string) =>
+    api.get<{ standings: TournamentParticipant[] }>(`/tournaments/${id}/standings`),
+
+  enterResult: (tournamentId: string, gameId: string, result: string) =>
+    api.put<Game>(`/tournaments/${tournamentId}/games/${gameId}/result`, { result }),
+};
+
+export default api;

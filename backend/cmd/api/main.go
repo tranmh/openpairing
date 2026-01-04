@@ -1,0 +1,241 @@
+package main
+
+import (
+	"context"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/openpairing/openpairing/internal/auth"
+	"github.com/openpairing/openpairing/internal/config"
+	"github.com/openpairing/openpairing/internal/database"
+	"github.com/openpairing/openpairing/internal/middleware"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+)
+
+func main() {
+	// Load configuration
+	cfg := config.Load()
+
+	// Configure logging
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	if cfg.Environment == "development" {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	}
+
+	// Connect to database
+	db, err := database.New(&cfg.Database)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to connect to database")
+	}
+	defer db.Close()
+
+	// Initialize services
+	authService := auth.NewService(db.Pool, &cfg.JWT)
+	authHandler := auth.NewHandler(authService)
+	authMiddleware := auth.NewMiddleware(auth.NewJWTService(&cfg.JWT))
+
+	// Create Gin router
+	router := setupRouter(cfg, authHandler, authMiddleware)
+
+	// Create server
+	srv := &http.Server{
+		Addr:         cfg.Server.Host + ":" + cfg.Server.Port,
+		Handler:      router,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
+		IdleTimeout:  cfg.Server.IdleTimeout,
+	}
+
+	// Start server in goroutine
+	go func() {
+		log.Info().Str("addr", srv.Addr).Msg("Starting API server")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal().Err(err).Msg("Failed to start server")
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Info().Msg("Shutting down server...")
+
+	// Graceful shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal().Err(err).Msg("Server forced to shutdown")
+	}
+
+	log.Info().Msg("Server exited")
+}
+
+func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware) *gin.Engine {
+	// Set Gin mode
+	if cfg.Environment == "production" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
+	router := gin.New()
+
+	// Global middleware
+	router.Use(middleware.Recovery())
+	router.Use(middleware.Logger())
+	router.Use(middleware.CORS(&cfg.CORS))
+
+	// Health check
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "healthy",
+			"service": "openpairing-api",
+			"time":    time.Now().UTC().Format(time.RFC3339),
+		})
+	})
+
+	// API v1 routes
+	v1 := router.Group("/api/v1")
+	{
+		// Auth routes - with rate limiting
+		authRoutes := v1.Group("/auth")
+		authRoutes.Use(middleware.AuthRateLimit())
+		{
+			authRoutes.POST("/register", authHandler.Register)
+			authRoutes.POST("/login", authHandler.Login)
+			authRoutes.POST("/logout", authHandler.Logout)
+			authRoutes.POST("/refresh", authHandler.RefreshToken)
+			authRoutes.POST("/forgot-password", authHandler.ForgotPassword)
+			authRoutes.POST("/reset-password", authHandler.ResetPassword)
+			authRoutes.GET("/me", authMiddleware.Authenticate(), authHandler.GetCurrentUser)
+		}
+
+		// Player routes
+		players := v1.Group("/players")
+		players.Use(middleware.APIRateLimit())
+		{
+			players.GET("", notImplemented)
+			players.GET("/:id", notImplemented)
+			players.POST("", authMiddleware.Authenticate(), authMiddleware.RequireAdmin(), notImplemented)
+			players.PUT("/:id", authMiddleware.Authenticate(), notImplemented)
+			players.GET("/:id/history", notImplemented)
+			players.POST("/import/fide", authMiddleware.Authenticate(), authMiddleware.RequireAdmin(), notImplemented)
+			players.POST("/import/dsb", authMiddleware.Authenticate(), authMiddleware.RequireAdmin(), notImplemented)
+			players.POST("/search-federation", authMiddleware.Authenticate(), notImplemented)
+		}
+
+		// Tournament routes
+		tournaments := v1.Group("/tournaments")
+		tournaments.Use(middleware.APIRateLimit())
+		{
+			tournaments.GET("", notImplemented)
+			tournaments.POST("", authMiddleware.Authenticate(), authMiddleware.RequireOrganizer(), notImplemented)
+			tournaments.GET("/:id", notImplemented)
+			tournaments.PUT("/:id", authMiddleware.Authenticate(), authMiddleware.RequireOrganizer(), notImplemented)
+			tournaments.DELETE("/:id", authMiddleware.Authenticate(), authMiddleware.RequireOrganizer(), notImplemented)
+			tournaments.POST("/:id/publish", authMiddleware.Authenticate(), authMiddleware.RequireOrganizer(), notImplemented)
+			tournaments.GET("/:id/standings", notImplemented)
+			tournaments.GET("/:id/crosstable", notImplemented)
+			tournaments.GET("/:id/export/:format", notImplemented)
+
+			// Participants
+			tournaments.GET("/:id/participants", notImplemented)
+			tournaments.POST("/:id/participants", authMiddleware.Authenticate(), notImplemented)
+			tournaments.DELETE("/:id/participants/:pid", authMiddleware.Authenticate(), notImplemented)
+			tournaments.PUT("/:id/participants/:pid", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
+			tournaments.POST("/:id/participants/import", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
+
+			// Rounds & Pairings
+			tournaments.GET("/:id/rounds", notImplemented)
+			tournaments.POST("/:id/rounds/:num/pair", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
+			tournaments.GET("/:id/rounds/:num/pairings", notImplemented)
+			tournaments.PUT("/:id/rounds/:num/pairings", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
+			tournaments.POST("/:id/rounds/:num/start", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
+			tournaments.POST("/:id/rounds/:num/complete", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
+
+			// Games
+			tournaments.GET("/:id/games", notImplemented)
+			tournaments.GET("/:id/games/:gid", notImplemented)
+			tournaments.PUT("/:id/games/:gid/result", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
+			tournaments.GET("/:id/games/:gid/pgn", notImplemented)
+
+			// Reports
+			tournaments.GET("/:id/reports/trf", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
+			tournaments.GET("/:id/reports/dwz", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
+			tournaments.GET("/:id/reports/norms", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
+			tournaments.POST("/:id/submit/fide", authMiddleware.Authenticate(), authMiddleware.RequireOrganizer(), notImplemented)
+			tournaments.POST("/:id/submit/dsb", authMiddleware.Authenticate(), authMiddleware.RequireOrganizer(), notImplemented)
+
+			// Teams
+			tournaments.GET("/:id/teams", notImplemented)
+			tournaments.POST("/:id/teams", authMiddleware.Authenticate(), notImplemented)
+			tournaments.DELETE("/:id/teams/:tid", authMiddleware.Authenticate(), notImplemented)
+			tournaments.GET("/:id/teams/:tid/lineup", notImplemented)
+			tournaments.GET("/:id/rounds/:r/lineups", notImplemented)
+			tournaments.GET("/:id/rounds/:r/lineups/:tid", notImplemented)
+			tournaments.PUT("/:id/rounds/:r/lineups/:tid", authMiddleware.Authenticate(), notImplemented)
+			tournaments.POST("/:id/rounds/:r/lineups/:tid/lock", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
+			tournaments.GET("/:id/matches", notImplemented)
+			tournaments.GET("/:id/rounds/:r/matches", notImplemented)
+			tournaments.GET("/:id/matches/:mid", notImplemented)
+			tournaments.GET("/:id/matches/:mid/boards", notImplemented)
+			tournaments.PUT("/:id/matches/:mid/boards/:b", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
+			tournaments.GET("/:id/team-standings", notImplemented)
+		}
+
+		// Organization routes
+		orgs := v1.Group("/organizations")
+		orgs.Use(middleware.APIRateLimit())
+		{
+			orgs.GET("", notImplemented)
+			orgs.POST("", authMiddleware.Authenticate(), notImplemented)
+			orgs.GET("/:id", notImplemented)
+			orgs.PUT("/:id", authMiddleware.Authenticate(), notImplemented)
+			orgs.GET("/:id/tournaments", notImplemented)
+		}
+
+		// Team routes
+		teams := v1.Group("/teams")
+		teams.Use(middleware.APIRateLimit())
+		{
+			teams.GET("", notImplemented)
+			teams.POST("", authMiddleware.Authenticate(), notImplemented)
+			teams.GET("/:id", notImplemented)
+			teams.PUT("/:id", authMiddleware.Authenticate(), notImplemented)
+			teams.GET("/:id/members", notImplemented)
+			teams.POST("/:id/members", authMiddleware.Authenticate(), notImplemented)
+			teams.DELETE("/:id/members/:pid", authMiddleware.Authenticate(), notImplemented)
+		}
+
+		// Club routes
+		clubs := v1.Group("/clubs")
+		clubs.Use(middleware.APIRateLimit())
+		{
+			clubs.GET("/:id/teams", notImplemented)
+		}
+
+		// Online games
+		games := v1.Group("/games")
+		games.Use(middleware.APIRateLimit())
+		{
+			games.GET("/:id", notImplemented)
+			games.POST("/:id/resign", authMiddleware.Authenticate(), notImplemented)
+			games.POST("/:id/draw-offer", authMiddleware.Authenticate(), notImplemented)
+			games.POST("/:id/abort", authMiddleware.Authenticate(), notImplemented)
+			games.POST("/:id/call-arbiter", authMiddleware.Authenticate(), notImplemented)
+		}
+	}
+
+	return router
+}
+
+func notImplemented(c *gin.Context) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":   "not_implemented",
+		"message": "This endpoint is not yet implemented",
+	})
+}

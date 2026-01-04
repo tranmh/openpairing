@@ -1,0 +1,190 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Chess board styling */
+.chess-board {
+  @apply rounded-lg shadow-lg overflow-hidden;
+}
+
+.chess-square-light {
+  background-color: #f0d9b5;
+}
+
+.chess-square-dark {
+  background-color: #b58863;
+}
+
+.chess-square-highlight {
+  background-color: #aaa23a !important;
+}
+
+.chess-square-move {
+  background-color: #cdd26a !important;
+}
+
+/* Clock styling */
+.chess-clock {
+  @apply font-mono text-2xl font-bold;
+}
+
+.chess-clock-active {
+  @apply text-green-600 dark:text-green-400;
+}
+
+.chess-clock-low {
+  @apply text-red-600 dark:text-red-400 animate-pulse-soft;
+}
+
+/* Tournament tables */
+.standings-table {
+  @apply w-full text-sm;
+}
+
+.standings-table th {
+  @apply px-2 py-2 text-left font-semibold bg-muted;
+}
+
+.standings-table td {
+  @apply px-2 py-2 border-b border-border;
+}
+
+.standings-table tr:hover {
+  @apply bg-muted/50;
+}
+
+/* Result badges */
+.result-badge {
+  @apply inline-flex items-center justify-center px-2 py-1 text-xs font-medium rounded;
+}
+
+.result-win {
+  @apply bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200;
+}
+
+.result-draw {
+  @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200;
+}
+
+.result-loss {
+  @apply bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200;
+}
+
+/* Title badges */
+.title-badge {
+  @apply inline-flex items-center px-1.5 py-0.5 text-xs font-semibold rounded;
+}
+
+.title-gm {
+  @apply bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200;
+}
+
+.title-im {
+  @apply bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-200;
+}
+
+.title-fm {
+  @apply bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200;
+}
+
+.title-cm {
+  @apply bg-stone-100 text-stone-800 dark:bg-stone-800 dark:text-stone-200;
+}
+
+/* Rating display */
+.rating-display {
+  @apply font-mono text-sm;
+}
+
+.rating-fide {
+  @apply text-blue-600 dark:text-blue-400;
+}
+
+.rating-dwz {
+  @apply text-green-600 dark:text-green-400;
+}
+
+.rating-oesb {
+  @apply text-red-600 dark:text-red-400;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-muted rounded-full;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-muted-foreground/30 rounded-full hover:bg-muted-foreground/50;
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  .standings-table {
+    font-size: 10pt;
+  }
+}

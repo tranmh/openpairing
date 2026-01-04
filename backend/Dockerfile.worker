@@ -1,0 +1,38 @@
+# Build stage
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+# Install dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Copy go mod files
+COPY go.mod go.sum* ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the worker binary
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /worker ./cmd/worker
+
+# Final stage
+FROM alpine:3.19
+
+WORKDIR /app
+
+# Install CA certificates, timezone data, and Java for JaVaFo
+RUN apk --no-cache add ca-certificates tzdata openjdk17-jre-headless
+
+# Copy binary from builder
+COPY --from=builder /worker .
+
+# Copy JaVaFo JAR (will be added later)
+COPY --from=builder /app/bin/* ./bin/ 2>/dev/null || true
+
+# Create non-root user
+RUN adduser -D -g '' appuser
+USER appuser
+
+# Run the binary
+CMD ["./worker"]
