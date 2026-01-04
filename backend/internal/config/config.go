@@ -15,6 +15,7 @@ type Config struct {
 	JWT         JWTConfig
 	CORS        CORSConfig
 	Federation  FederationConfig
+	Pairing     PairingConfig
 }
 
 type ServerConfig struct {
@@ -74,6 +75,12 @@ type FederationConfig struct {
 	SSBAPIKey        string
 }
 
+type PairingConfig struct {
+	JaVaFoPath string
+	BBPPath    string
+	Timeout    time.Duration
+}
+
 // Load loads configuration from environment variables
 func Load() *Config {
 	return &Config{
@@ -128,6 +135,11 @@ func Load() *Config {
 			DSBAPIKey:        getEnv("FEDERATION_DSB_API_KEY", ""),
 			OESBAPIKey:       getEnv("FEDERATION_OESB_API_KEY", ""),
 			SSBAPIKey:        getEnv("FEDERATION_SSB_API_KEY", ""),
+		},
+		Pairing: PairingConfig{
+			JaVaFoPath: getEnv("JAVAFO_PATH", ""),
+			BBPPath:    getEnv("BBP_PATH", ""),
+			Timeout:    getDurationEnv("PAIRING_TIMEOUT", 5*time.Minute),
 		},
 	}
 }

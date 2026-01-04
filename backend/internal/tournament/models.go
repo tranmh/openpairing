@@ -86,8 +86,8 @@ type Tournament struct {
 	AcceleratedPairing bool          `json:"acceleratedPairing" db:"accelerated_pairing"`
 
 	// Dates
-	StartDate          string     `json:"startDate" db:"start_date"`
-	EndDate            *string    `json:"endDate,omitempty" db:"end_date"`
+	StartDate          time.Time  `json:"startDate" db:"start_date"`
+	EndDate            *time.Time `json:"endDate,omitempty" db:"end_date"`
 	RegistrationOpens  *time.Time `json:"registrationOpens,omitempty" db:"registration_opens"`
 	RegistrationCloses *time.Time `json:"registrationCloses,omitempty" db:"registration_closes"`
 

@@ -52,6 +52,16 @@ func (g *Generator) SetTournamentType(ttype string) {
 	g.trf.TournamentType = ttype
 }
 
+// SetInitialColors sets the initial color configuration for bbpPairings
+func (g *Generator) SetInitialColors(colors ...string) {
+	g.trf.XXCRecords = colors
+}
+
+// SetRounds sets the number of rounds (XXR record)
+func (g *Generator) SetRounds(rounds int) {
+	g.trf.Rounds = rounds
+}
+
 // AddPlayer adds a player to the TRF file
 func (g *Generator) AddPlayer(player TRFPlayer) {
 	g.trf.Players = append(g.trf.Players, player)
@@ -107,6 +117,17 @@ func (g *Generator) Generate() string {
 		lines = append(lines, fmt.Sprintf("112 %s", strings.Join(g.trf.RoundDates, " ")))
 	}
 
+	// XXR record - number of rounds (required by bbpPairings)
+	if g.trf.Rounds > 0 {
+		lines = append(lines, fmt.Sprintf("XXR %d", g.trf.Rounds))
+	}
+
+	// XXC records - initial colors (required by bbpPairings)
+	// Add before players section
+	for _, xxc := range g.trf.XXCRecords {
+		lines = append(lines, fmt.Sprintf("XXC %s", xxc))
+	}
+
 	// Blank line before players
 	lines = append(lines, "122")
 
@@ -120,14 +141,9 @@ func (g *Generator) Generate() string {
 		lines = append(lines, g.generateTeamLine(team))
 	}
 
-	// XXR records
+	// XXR records (player-specific)
 	for startNo, data := range g.trf.XXRRecords {
 		lines = append(lines, fmt.Sprintf("XXR %4d %s", startNo, data))
-	}
-
-	// XXC records
-	for _, xxc := range g.trf.XXCRecords {
-		lines = append(lines, fmt.Sprintf("XXC %s", xxc))
 	}
 
 	return strings.Join(lines, "\n")
@@ -226,14 +242,16 @@ func (g *Generator) generateRoundResult(result TRFRoundResult) string {
 		resultChar = "-"
 	}
 
+	// TRF format: 4 chars opponent (right-justified) + space + color + space + result
+	// Total: 8 chars per round result
 	if result.OpponentNo > 0 {
-		return fmt.Sprintf("  %s %s%3d", color, resultChar, result.OpponentNo)
-	} else if result.Result == "H" || result.Result == "Z" {
-		// Bye
-		return fmt.Sprintf("  - %s   ", resultChar)
+		return fmt.Sprintf("  %4d %s %s", result.OpponentNo, color, resultChar)
+	} else if result.Result == "H" || result.Result == "F" || result.Result == "Z" {
+		// Bye (H=half-point, F=full-point, Z=zero-point)
+		return fmt.Sprintf("       - %s", resultChar)
 	} else {
 		// Unpaired
-		return fmt.Sprintf("  - U   ")
+		return fmt.Sprintf("       - U")
 	}
 }
 

@@ -15,12 +15,12 @@ import (
 // Service provides tournament business logic
 type Service struct {
 	repo          Repository
-	pairingEngine *engine.JaVaFo
+	pairingEngine engine.PairingEngine
 	logger        zerolog.Logger
 }
 
 // NewService creates a new tournament service
-func NewService(repo Repository, pairingEngine *engine.JaVaFo, logger zerolog.Logger) *Service {
+func NewService(repo Repository, pairingEngine engine.PairingEngine, logger zerolog.Logger) *Service {
 	return &Service{
 		repo:          repo,
 		pairingEngine: pairingEngine,
@@ -30,6 +30,29 @@ func NewService(repo Repository, pairingEngine *engine.JaVaFo, logger zerolog.Lo
 
 // CreateTournament creates a new tournament
 func (s *Service) CreateTournament(ctx context.Context, req *CreateTournamentRequest, organizerID uuid.UUID) (*Tournament, error) {
+	// Parse start date from string
+	startDate, err := time.Parse(time.RFC3339, req.StartDate)
+	if err != nil {
+		// Try date-only format
+		startDate, err = time.Parse("2006-01-02", req.StartDate)
+		if err != nil {
+			return nil, fmt.Errorf("invalid start date format: %w", err)
+		}
+	}
+
+	// Parse end date if provided
+	var endDate *time.Time
+	if req.EndDate != nil {
+		ed, err := time.Parse(time.RFC3339, *req.EndDate)
+		if err != nil {
+			ed, err = time.Parse("2006-01-02", *req.EndDate)
+			if err != nil {
+				return nil, fmt.Errorf("invalid end date format: %w", err)
+			}
+		}
+		endDate = &ed
+	}
+
 	tournament := &Tournament{
 		ID:                uuid.New(),
 		OrganizationID:   req.OrganizationID,
@@ -43,8 +66,8 @@ func (s *Service) CreateTournament(ctx context.Context, req *CreateTournamentReq
 		PairingEngine:    req.PairingEngine,
 		PairingSystem:    req.PairingSystem,
 		AcceleratedPairing: req.AcceleratedPairing,
-		StartDate:        req.StartDate,
-		EndDate:          req.EndDate,
+		StartDate:        startDate,
+		EndDate:          endDate,
 		RegistrationOpens:  req.RegistrationOpens,
 		RegistrationCloses: req.RegistrationCloses,
 		MaxPlayers:       req.MaxPlayers,
@@ -125,10 +148,24 @@ func (s *Service) UpdateTournament(ctx context.Context, id uuid.UUID, req *Updat
 		tournament.Description = req.Description
 	}
 	if req.StartDate != nil {
-		tournament.StartDate = *req.StartDate
+		startDate, err := time.Parse(time.RFC3339, *req.StartDate)
+		if err != nil {
+			startDate, err = time.Parse("2006-01-02", *req.StartDate)
+			if err != nil {
+				return nil, fmt.Errorf("invalid start date format: %w", err)
+			}
+		}
+		tournament.StartDate = startDate
 	}
 	if req.EndDate != nil {
-		tournament.EndDate = req.EndDate
+		endDate, err := time.Parse(time.RFC3339, *req.EndDate)
+		if err != nil {
+			endDate, err = time.Parse("2006-01-02", *req.EndDate)
+			if err != nil {
+				return nil, fmt.Errorf("invalid end date format: %w", err)
+			}
+		}
+		tournament.EndDate = &endDate
 	}
 	if req.Rounds != nil {
 		tournament.Rounds = *req.Rounds
@@ -206,7 +243,7 @@ func (s *Service) validateForPublish(t *Tournament) error {
 	if t.Rounds == 0 {
 		return fmt.Errorf("rounds must be specified")
 	}
-	if t.StartDate == "" {
+	if t.StartDate.IsZero() {
 		return fmt.Errorf("start date is required")
 	}
 	return nil
@@ -453,6 +490,11 @@ func (s *Service) GeneratePairings(ctx context.Context, tournamentID uuid.UUID, 
 		return nil, fmt.Errorf("round is not in pending status")
 	}
 
+	// Check if pairing engine is available
+	if s.pairingEngine == nil {
+		return nil, fmt.Errorf("pairing engine not configured - set JAVAFO_PATH environment variable")
+	}
+
 	// Generate TRF for pairing engine
 	trfData, err := s.generateTRFForPairing(ctx, tournament, roundNumber)
 	if err != nil {
@@ -521,6 +563,15 @@ func (s *Service) GeneratePairings(ctx context.Context, tournamentID uuid.UUID, 
 		return nil, fmt.Errorf("failed to save pairings: %w", err)
 	}
 
+	// Update participant scores for BYE games
+	for _, game := range games {
+		if game.Result != nil && *game.Result == "BYE" {
+			if err := s.updateParticipantScores(ctx, &game); err != nil {
+				s.logger.Warn().Err(err).Msg("Failed to update BYE participant score")
+			}
+		}
+	}
+
 	// Update round status
 	now := time.Now()
 	round.Status = RoundStatusPaired
@@ -564,14 +615,31 @@ func (s *Service) generateTRFForPairing(ctx context.Context, tournament *Tournam
 		city = *tournament.VenueCity
 	}
 	generator.SetTournamentInfo(tournament.Name, city, "", tournament.Rounds)
-	// Parse StartDate string to time.Time
-	startDate, _ := time.Parse("2006-01-02", tournament.StartDate)
-	generator.SetDates(startDate, time.Time{})
+	generator.SetDates(tournament.StartDate, time.Time{})
 
 	for _, p := range participants {
+		// Build player name for TRF
+		playerName := ""
+		if p.PlayerLastName != nil && p.PlayerFirstName != nil {
+			playerName = *p.PlayerLastName + ", " + *p.PlayerFirstName
+		} else if p.PlayerLastName != nil {
+			playerName = *p.PlayerLastName
+		} else if p.PlayerFirstName != nil {
+			playerName = *p.PlayerFirstName
+		} else {
+			playerName = fmt.Sprintf("Player %d", p.StartRank)
+		}
+
+		fideID := ""
+		if p.PlayerFideID != nil {
+			fideID = *p.PlayerFideID
+		}
+
 		player := trf.TRFPlayer{
 			StartNo:    p.StartRank,
+			Name:       playerName,
 			Rating:     p.StartingRating,
+			FideID:     fideID,
 			Points:     p.Points,
 			Rank:       p.StartRank,
 		}
@@ -1115,13 +1183,11 @@ func (s *Service) ExportTRF(ctx context.Context, tournamentID uuid.UUID) (string
 		city = *tournament.VenueCity
 	}
 	generator.SetTournamentInfo(tournament.Name, city, "", tournament.Rounds)
-	// Parse dates from strings
-	startDate, _ := time.Parse("2006-01-02", tournament.StartDate)
 	var endDate time.Time
 	if tournament.EndDate != nil {
-		endDate, _ = time.Parse("2006-01-02", *tournament.EndDate)
+		endDate = *tournament.EndDate
 	}
-	generator.SetDates(startDate, endDate)
+	generator.SetDates(tournament.StartDate, endDate)
 	generator.SetTimeControl(tournament.TimeControl)
 
 	switch tournament.Type {
@@ -1132,8 +1198,17 @@ func (s *Service) ExportTRF(ctx context.Context, tournamentID uuid.UUID) (string
 	}
 
 	for _, p := range participants {
+		// Build player name
+		playerName := ""
+		if p.PlayerLastName != nil && p.PlayerFirstName != nil {
+			playerName = *p.PlayerLastName + ", " + *p.PlayerFirstName
+		} else if p.PlayerLastName != nil {
+			playerName = *p.PlayerLastName
+		}
+
 		player := trf.TRFPlayer{
 			StartNo: p.StartRank,
+			Name:    playerName,
 			Rating:  p.StartingRating,
 			Points:  p.Points,
 			Rank:    p.StartRank, // This should be final rank
@@ -1153,6 +1228,19 @@ func (s *Service) ExportTRF(ctx context.Context, tournamentID uuid.UUID) (string
 
 			result := trf.TRFRoundResult{
 				Round: round.RoundNumber,
+			}
+
+			// Handle BYE games
+			if g.Result != nil && *g.Result == "BYE" {
+				result.Color = "-"
+				if g.WhiteScore != nil && *g.WhiteScore == 1 {
+					result.Result = "F" // Full-point bye
+				} else {
+					result.Result = "H" // Half-point bye
+				}
+				result.OpponentNo = 0
+				player.RoundResults = append(player.RoundResults, result)
+				continue
 			}
 
 			if g.WhiteParticipantID != nil && *g.WhiteParticipantID == p.ID {

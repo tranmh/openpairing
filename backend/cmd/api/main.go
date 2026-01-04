@@ -20,7 +20,9 @@ import (
 	"github.com/openpairing/openpairing/internal/federation/ssb"
 	"github.com/openpairing/openpairing/internal/middleware"
 	"github.com/openpairing/openpairing/internal/notification"
+	"github.com/openpairing/openpairing/internal/pairing/engine"
 	"github.com/openpairing/openpairing/internal/player"
+	"github.com/openpairing/openpairing/internal/tournament"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -100,8 +102,42 @@ func main() {
 	notificationService := notification.NewService(notificationRepo, log.Logger)
 	notificationHandler := notification.NewHandler(notificationService, log.Logger)
 
+	// Tournament service
+	tournamentRepo := tournament.NewRepository(db.Pool)
+	// Initialize pairing engine - try BBPPairings first, then JaVaFo
+	var pairingEngine engine.PairingEngine
+	if cfg.Pairing.BBPPath != "" {
+		bbp, err := engine.NewBBPPairings(&engine.BBPConfig{
+			ExecPath: cfg.Pairing.BBPPath,
+			Timeout:  cfg.Pairing.Timeout,
+		}, log.Logger)
+		if err != nil {
+			log.Warn().Err(err).Msg("bbpPairings not available")
+		} else {
+			pairingEngine = bbp
+			log.Info().Msg("Using bbpPairings engine")
+		}
+	}
+	if pairingEngine == nil && cfg.Pairing.JaVaFoPath != "" {
+		javafo, err := engine.NewJaVaFo(&engine.JaVaFoConfig{
+			JarPath: cfg.Pairing.JaVaFoPath,
+			Timeout: cfg.Pairing.Timeout,
+		}, log.Logger)
+		if err != nil {
+			log.Warn().Err(err).Msg("JaVaFo not available")
+		} else {
+			pairingEngine = javafo
+			log.Info().Msg("Using JaVaFo engine")
+		}
+	}
+	if pairingEngine == nil {
+		log.Warn().Msg("No pairing engine available - pairing generation will be disabled")
+	}
+	tournamentService := tournament.NewService(tournamentRepo, pairingEngine, log.Logger)
+	tournamentHandler := tournament.NewHandler(tournamentService, log.Logger)
+
 	// Create Gin router
-	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler)
+	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler)
 
 	// Create server
 	srv := &http.Server{
@@ -155,7 +191,7 @@ func main() {
 	log.Info().Msg("Server exited")
 }
 
-func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler) *gin.Engine {
+func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler) *gin.Engine {
 	// Set Gin mode
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -205,64 +241,8 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 		// Notification routes
 		notificationHandler.RegisterRoutes(v1)
 
-		// Tournament routes
-		tournaments := v1.Group("/tournaments")
-		tournaments.Use(middleware.APIRateLimit())
-		{
-			tournaments.GET("", notImplemented)
-			tournaments.POST("", authMiddleware.Authenticate(), authMiddleware.RequireOrganizer(), notImplemented)
-			tournaments.GET("/:id", notImplemented)
-			tournaments.PUT("/:id", authMiddleware.Authenticate(), authMiddleware.RequireOrganizer(), notImplemented)
-			tournaments.DELETE("/:id", authMiddleware.Authenticate(), authMiddleware.RequireOrganizer(), notImplemented)
-			tournaments.POST("/:id/publish", authMiddleware.Authenticate(), authMiddleware.RequireOrganizer(), notImplemented)
-			tournaments.GET("/:id/standings", notImplemented)
-			tournaments.GET("/:id/crosstable", notImplemented)
-			tournaments.GET("/:id/export/:format", notImplemented)
-
-			// Participants
-			tournaments.GET("/:id/participants", notImplemented)
-			tournaments.POST("/:id/participants", authMiddleware.Authenticate(), notImplemented)
-			tournaments.DELETE("/:id/participants/:pid", authMiddleware.Authenticate(), notImplemented)
-			tournaments.PUT("/:id/participants/:pid", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
-			tournaments.POST("/:id/participants/import", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
-
-			// Rounds & Pairings
-			tournaments.GET("/:id/rounds", notImplemented)
-			tournaments.POST("/:id/rounds/:num/pair", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
-			tournaments.GET("/:id/rounds/:num/pairings", notImplemented)
-			tournaments.PUT("/:id/rounds/:num/pairings", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
-			tournaments.POST("/:id/rounds/:num/start", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
-			tournaments.POST("/:id/rounds/:num/complete", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
-
-			// Games
-			tournaments.GET("/:id/games", notImplemented)
-			tournaments.GET("/:id/games/:gid", notImplemented)
-			tournaments.PUT("/:id/games/:gid/result", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
-			tournaments.GET("/:id/games/:gid/pgn", notImplemented)
-
-			// Reports
-			tournaments.GET("/:id/reports/trf", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
-			tournaments.GET("/:id/reports/dwz", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
-			tournaments.GET("/:id/reports/norms", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
-			tournaments.POST("/:id/submit/fide", authMiddleware.Authenticate(), authMiddleware.RequireOrganizer(), notImplemented)
-			tournaments.POST("/:id/submit/dsb", authMiddleware.Authenticate(), authMiddleware.RequireOrganizer(), notImplemented)
-
-			// Teams
-			tournaments.GET("/:id/teams", notImplemented)
-			tournaments.POST("/:id/teams", authMiddleware.Authenticate(), notImplemented)
-			tournaments.DELETE("/:id/teams/:tid", authMiddleware.Authenticate(), notImplemented)
-			tournaments.GET("/:id/teams/:tid/lineup", notImplemented)
-			tournaments.GET("/:id/rounds/:num/lineups", notImplemented)
-			tournaments.GET("/:id/rounds/:num/lineups/:tid", notImplemented)
-			tournaments.PUT("/:id/rounds/:num/lineups/:tid", authMiddleware.Authenticate(), notImplemented)
-			tournaments.POST("/:id/rounds/:num/lineups/:tid/lock", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
-			tournaments.GET("/:id/matches", notImplemented)
-			tournaments.GET("/:id/rounds/:num/matches", notImplemented)
-			tournaments.GET("/:id/matches/:mid", notImplemented)
-			tournaments.GET("/:id/matches/:mid/boards", notImplemented)
-			tournaments.PUT("/:id/matches/:mid/boards/:b", authMiddleware.Authenticate(), authMiddleware.RequireArbiter(), notImplemented)
-			tournaments.GET("/:id/team-standings", notImplemented)
-		}
+		// Tournament routes - use the tournament handler's RegisterRoutes
+		tournamentHandler.RegisterRoutes(v1, authMiddleware.Authenticate())
 
 		// Organization routes
 		orgs := v1.Group("/organizations")

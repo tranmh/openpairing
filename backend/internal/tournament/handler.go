@@ -88,10 +88,14 @@ func (h *Handler) CreateTournament(c *gin.Context) {
 	}
 
 	// Get user ID from context (set by auth middleware)
-	userID, _ := c.Get("user_id")
-	organizerID, ok := userID.(uuid.UUID)
-	if !ok {
+	userIDStr, exists := c.Get("user_id")
+	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	organizerID, err := uuid.Parse(userIDStr.(string))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user id"})
 		return
 	}
 
@@ -464,8 +468,8 @@ func (h *Handler) GeneratePairings(c *gin.Context) {
 		return
 	}
 
-	userID, _ := c.Get("user_id")
-	arbiterID, _ := userID.(uuid.UUID)
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
 
 	games, err := h.service.GeneratePairings(c.Request.Context(), id, round, arbiterID)
 	if err != nil {
@@ -611,8 +615,8 @@ func (h *Handler) EnterResult(c *gin.Context) {
 		return
 	}
 
-	userID, _ := c.Get("user_id")
-	arbiterID, _ := userID.(uuid.UUID)
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
 
 	game, err := h.service.EnterResult(c.Request.Context(), gameID, &req, arbiterID)
 	if err != nil {

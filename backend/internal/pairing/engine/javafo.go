@@ -93,21 +93,11 @@ func (j *JaVaFo) GeneratePairings(ctx context.Context, req *PairingRequest) (*Pa
 	// Prepare output path
 	outputPath := filepath.Join(tmpDir, "output.trf")
 
-	// Build command
+	// Build command - JaVaFo syntax: java -jar javafo.jar input-file -p output-file
 	args := []string{
 		"-jar", j.jarPath,
-		"-p", inputPath,   // Input file
-		"-o", outputPath,  // Output file
-	}
-
-	// Add pairing system
-	switch req.PairingSystem {
-	case "dutch", "":
-		args = append(args, "-d") // Dutch system (default)
-	case "burstein":
-		args = append(args, "-b") // Burstein system
-	case "dubov":
-		args = append(args, "-r") // Dubov system
+		inputPath,          // Input TRF file (positional)
+		"-p", outputPath,   // -p specifies output file for pairings
 	}
 
 	// Create context with timeout
