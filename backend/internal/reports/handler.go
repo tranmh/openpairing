@@ -411,17 +411,30 @@ func (s *TRFReportService) GenerateReport(ctx context.Context, tournamentID uuid
 		white := participantByID[game.WhiteID]
 		black := participantByID[game.BlackID]
 
-		if white != nil {
+		// Only add game results if both players exist
+		if white != nil && black != nil {
 			playerRounds[white.StartNumber] = append(playerRounds[white.StartNumber], TRFRound{
 				OpponentNo: black.StartNumber,
 				Color:      "w",
 				Result:     trfResult(game.WhiteScore),
 			})
-		}
-		if black != nil {
 			playerRounds[black.StartNumber] = append(playerRounds[black.StartNumber], TRFRound{
 				OpponentNo: white.StartNumber,
 				Color:      "b",
+				Result:     trfResult(game.BlackScore),
+			})
+		} else if white != nil {
+			// Bye or forfeit for white
+			playerRounds[white.StartNumber] = append(playerRounds[white.StartNumber], TRFRound{
+				OpponentNo: 0,
+				Color:      "-",
+				Result:     trfResult(game.WhiteScore),
+			})
+		} else if black != nil {
+			// Bye or forfeit for black
+			playerRounds[black.StartNumber] = append(playerRounds[black.StartNumber], TRFRound{
+				OpponentNo: 0,
+				Color:      "-",
 				Result:     trfResult(game.BlackScore),
 			})
 		}

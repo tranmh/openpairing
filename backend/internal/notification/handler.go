@@ -109,13 +109,20 @@ func (h *Handler) GetUnreadCount(c *gin.Context) {
 // @Success 204
 // @Router /notifications/{id}/read [put]
 func (h *Handler) MarkAsRead(c *gin.Context) {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
 	notificationID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		response.BadRequest(c, "Invalid notification ID")
 		return
 	}
 
-	if err := h.service.MarkAsRead(c.Request.Context(), notificationID); err != nil {
+	// Verify ownership before marking as read
+	if err := h.service.MarkAsReadForUser(c.Request.Context(), notificationID, userID); err != nil {
 		h.logger.Error().Err(err).Str("notificationId", notificationID.String()).Msg("Failed to mark as read")
 		response.InternalServerError(c, "Failed to mark notification as read")
 		return
@@ -152,13 +159,20 @@ func (h *Handler) MarkAllAsRead(c *gin.Context) {
 // @Success 204
 // @Router /notifications/{id} [delete]
 func (h *Handler) DeleteNotification(c *gin.Context) {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
 	notificationID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		response.BadRequest(c, "Invalid notification ID")
 		return
 	}
 
-	if err := h.service.repo.Delete(c.Request.Context(), notificationID); err != nil {
+	// Verify ownership before deleting
+	if err := h.service.DeleteForUser(c.Request.Context(), notificationID, userID); err != nil {
 		h.logger.Error().Err(err).Str("notificationId", notificationID.String()).Msg("Failed to delete notification")
 		response.InternalServerError(c, "Failed to delete notification")
 		return

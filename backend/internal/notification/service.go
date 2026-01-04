@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -213,6 +214,7 @@ type Service struct {
 
 	// Channels for real-time delivery
 	subscribers map[uuid.UUID][]chan Notification
+	subMu       sync.RWMutex
 }
 
 // NewService creates a new notification service
@@ -275,6 +277,32 @@ func (s *Service) MarkAsRead(ctx context.Context, notificationID uuid.UUID) erro
 	return s.repo.MarkAsRead(ctx, notificationID)
 }
 
+// MarkAsReadForUser marks a notification as read with ownership verification
+func (s *Service) MarkAsReadForUser(ctx context.Context, notificationID, userID uuid.UUID) error {
+	// Verify ownership
+	notification, err := s.repo.GetByID(ctx, notificationID)
+	if err != nil {
+		return fmt.Errorf("notification not found: %w", err)
+	}
+	if notification.UserID != userID {
+		return fmt.Errorf("notification does not belong to user")
+	}
+	return s.repo.MarkAsRead(ctx, notificationID)
+}
+
+// DeleteForUser deletes a notification with ownership verification
+func (s *Service) DeleteForUser(ctx context.Context, notificationID, userID uuid.UUID) error {
+	// Verify ownership
+	notification, err := s.repo.GetByID(ctx, notificationID)
+	if err != nil {
+		return fmt.Errorf("notification not found: %w", err)
+	}
+	if notification.UserID != userID {
+		return fmt.Errorf("notification does not belong to user")
+	}
+	return s.repo.Delete(ctx, notificationID)
+}
+
 // MarkAllAsRead marks all notifications as read for a user
 func (s *Service) MarkAllAsRead(ctx context.Context, userID uuid.UUID) error {
 	return s.repo.MarkAllAsRead(ctx, userID)
@@ -283,29 +311,46 @@ func (s *Service) MarkAllAsRead(ctx context.Context, userID uuid.UUID) error {
 // Subscribe allows a client to receive real-time notifications
 func (s *Service) Subscribe(userID uuid.UUID) <-chan Notification {
 	ch := make(chan Notification, 100)
+	s.subMu.Lock()
 	s.subscribers[userID] = append(s.subscribers[userID], ch)
+	s.subMu.Unlock()
 	return ch
 }
 
 // Unsubscribe removes a subscription
 func (s *Service) Unsubscribe(userID uuid.UUID, ch <-chan Notification) {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+
 	subs := s.subscribers[userID]
 	for i, sub := range subs {
 		if sub == ch {
+			// Remove from slice
 			s.subscribers[userID] = append(subs[:i], subs[i+1:]...)
+			// Close the channel (safe because we created it as bidirectional internally)
 			close(sub)
 			break
 		}
+	}
+
+	// Clean up empty subscriber lists
+	if len(s.subscribers[userID]) == 0 {
+		delete(s.subscribers, userID)
 	}
 }
 
 // deliverToSubscribers sends notification to real-time subscribers
 func (s *Service) deliverToSubscribers(userID uuid.UUID, n Notification) {
-	for _, ch := range s.subscribers[userID] {
+	s.subMu.RLock()
+	subs := s.subscribers[userID]
+	s.subMu.RUnlock()
+
+	for _, ch := range subs {
 		select {
 		case ch <- n:
 		default:
 			// Channel full, skip
+			s.logger.Warn().Str("userId", userID.String()).Msg("Notification channel full, dropping notification")
 		}
 	}
 }

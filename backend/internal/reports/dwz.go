@@ -388,24 +388,39 @@ func (s *DWZReportService) GenerateReport(ctx context.Context, tournamentID uuid
 		white := participantByID[game.WhiteID]
 		black := participantByID[game.BlackID]
 
-		if white != nil {
+		// Only add game results if both players exist
+		if white != nil && black != nil {
 			playerRounds[white.StartNumber] = append(playerRounds[white.StartNumber], DWZRoundResult{
 				Round:       game.Round,
 				OpponentNum: black.StartNumber,
 				Color:       "w",
 				Result:      scoreToResult(game.WhiteScore),
 			})
-		}
-		if black != nil {
 			playerRounds[black.StartNumber] = append(playerRounds[black.StartNumber], DWZRoundResult{
 				Round:       game.Round,
 				OpponentNum: white.StartNumber,
 				Color:       "s",
 				Result:      scoreToResult(game.BlackScore),
 			})
+		} else if white != nil {
+			// Bye or forfeit for white
+			playerRounds[white.StartNumber] = append(playerRounds[white.StartNumber], DWZRoundResult{
+				Round:       game.Round,
+				OpponentNum: 0,
+				Color:       "",
+				Result:      scoreToResult(game.WhiteScore),
+			})
+		} else if black != nil {
+			// Bye or forfeit for black
+			playerRounds[black.StartNumber] = append(playerRounds[black.StartNumber], DWZRoundResult{
+				Round:       game.Round,
+				OpponentNum: 0,
+				Color:       "",
+				Result:      scoreToResult(game.BlackScore),
+			})
 		}
 
-		// Add game record
+		// Add game record (only for actual games)
 		if white != nil && black != nil {
 			gen.AddGame(DWZGameRecord{
 				Round:     game.Round,
