@@ -1,9 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useAuthStore } from '@/store/auth';
+import { useRedirectIfAuthenticated } from '@/hooks/useAuth';
 
 export default function RegisterPage() {
+  const router = useRouter();
+  const { register, isLoading, error, clearError } = useAuthStore();
+  const { isAuthenticated } = useRedirectIfAuthenticated();
+
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -12,8 +19,11 @@ export default function RegisterPage() {
     lastName: '',
     acceptTerms: false,
   });
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [validationError, setValidationError] = useState('');
+
+  useEffect(() => {
+    clearError();
+  }, [clearError]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
@@ -21,45 +31,70 @@ export default function RegisterPage() {
       ...prev,
       [name]: type === 'checkbox' ? checked : value,
     }));
+    setValidationError('');
+  };
+
+  const validateForm = (): boolean => {
+    if (formData.password !== formData.confirmPassword) {
+      setValidationError('Die Passwörter stimmen nicht überein');
+      return false;
+    }
+
+    if (formData.password.length < 8) {
+      setValidationError('Das Passwort muss mindestens 8 Zeichen lang sein');
+      return false;
+    }
+
+    // Check for uppercase, lowercase, and number
+    if (!/[A-Z]/.test(formData.password)) {
+      setValidationError('Das Passwort muss mindestens einen Großbuchstaben enthalten');
+      return false;
+    }
+
+    if (!/[a-z]/.test(formData.password)) {
+      setValidationError('Das Passwort muss mindestens einen Kleinbuchstaben enthalten');
+      return false;
+    }
+
+    if (!/[0-9]/.test(formData.password)) {
+      setValidationError('Das Passwort muss mindestens eine Zahl enthalten');
+      return false;
+    }
+
+    if (!formData.acceptTerms) {
+      setValidationError('Bitte akzeptieren Sie die AGB');
+      return false;
+    }
+
+    return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-    setError('');
+    setValidationError('');
 
-    // Validation
-    if (formData.password !== formData.confirmPassword) {
-      setError('Die Passwörter stimmen nicht überein');
-      setIsLoading(false);
+    if (!validateForm()) {
       return;
     }
 
-    if (formData.password.length < 8) {
-      setError('Das Passwort muss mindestens 8 Zeichen lang sein');
-      setIsLoading(false);
-      return;
-    }
+    const success = await register({
+      email: formData.email,
+      password: formData.password,
+      firstName: formData.firstName,
+      lastName: formData.lastName,
+    });
 
-    if (!formData.acceptTerms) {
-      setError('Bitte akzeptieren Sie die AGB');
-      setIsLoading(false);
-      return;
-    }
-
-    try {
-      // TODO: Implement actual registration API call
-      console.log('Registration attempt:', formData);
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      // Redirect to login on success
-      window.location.href = '/login?registered=true';
-    } catch (err) {
-      setError('Registrierung fehlgeschlagen. Bitte versuchen Sie es erneut.');
-    } finally {
-      setIsLoading(false);
+    if (success) {
+      router.push('/login?registered=true');
     }
   };
+
+  // Don't render if already authenticated (redirecting)
+  if (isAuthenticated) {
+    return null;
+  }
+
+  const displayError = validationError || error;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/50 px-4 py-12">
@@ -75,9 +110,9 @@ export default function RegisterPage() {
             </p>
           </div>
 
-          {error && (
+          {displayError && (
             <div className="mb-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-              {error}
+              {displayError}
             </div>
           )}
 
@@ -96,6 +131,8 @@ export default function RegisterPage() {
                   className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   placeholder="Max"
                   required
+                  disabled={isLoading}
+                  autoComplete="given-name"
                 />
               </div>
               <div>
@@ -111,6 +148,8 @@ export default function RegisterPage() {
                   className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   placeholder="Mustermann"
                   required
+                  disabled={isLoading}
+                  autoComplete="family-name"
                 />
               </div>
             </div>
@@ -128,6 +167,8 @@ export default function RegisterPage() {
                 className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 placeholder="name@beispiel.de"
                 required
+                disabled={isLoading}
+                autoComplete="email"
               />
             </div>
 
@@ -145,7 +186,12 @@ export default function RegisterPage() {
                 placeholder="Mindestens 8 Zeichen"
                 required
                 minLength={8}
+                disabled={isLoading}
+                autoComplete="new-password"
               />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Mindestens 8 Zeichen, 1 Großbuchstabe, 1 Kleinbuchstabe, 1 Zahl
+              </p>
             </div>
 
             <div>
@@ -161,6 +207,8 @@ export default function RegisterPage() {
                 className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 placeholder="Passwort wiederholen"
                 required
+                disabled={isLoading}
+                autoComplete="new-password"
               />
             </div>
 
@@ -173,6 +221,7 @@ export default function RegisterPage() {
                 onChange={handleChange}
                 className="mt-1 h-4 w-4 rounded border-input text-primary focus:ring-primary"
                 required
+                disabled={isLoading}
               />
               <label htmlFor="acceptTerms" className="ml-2 text-sm text-muted-foreground">
                 Ich akzeptiere die{' '}
@@ -191,7 +240,14 @@ export default function RegisterPage() {
               disabled={isLoading}
               className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {isLoading ? 'Wird registriert...' : 'Registrieren'}
+              {isLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
+                  Wird registriert...
+                </span>
+              ) : (
+                'Registrieren'
+              )}
             </button>
           </form>
 

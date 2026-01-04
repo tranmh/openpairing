@@ -1,32 +1,44 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useAuthStore } from '@/store/auth';
+import { useRedirectIfAuthenticated } from '@/hooks/useAuth';
 
 export default function LoginPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnUrl = searchParams.get('returnUrl') || '/dashboard';
+  const registered = searchParams.get('registered');
+
+  const { login, isLoading, error, clearError } = useAuthStore();
+  const { isAuthenticated } = useRedirectIfAuthenticated(returnUrl);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
+  const [showRegisteredMessage, setShowRegisteredMessage] = useState(registered === 'true');
+
+  useEffect(() => {
+    // Clear any existing errors when component mounts
+    clearError();
+  }, [clearError]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-    setError('');
+    setShowRegisteredMessage(false);
 
-    try {
-      // TODO: Implement actual login API call
-      console.log('Login attempt:', { email, password });
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      // Redirect to dashboard on success
-      window.location.href = '/dashboard';
-    } catch (err) {
-      setError('Ungültige E-Mail oder Passwort');
-    } finally {
-      setIsLoading(false);
+    const success = await login(email, password);
+    if (success) {
+      router.push(returnUrl);
     }
   };
+
+  // Don't render if already authenticated (redirecting)
+  if (isAuthenticated) {
+    return null;
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/50 px-4">
@@ -41,6 +53,12 @@ export default function LoginPage() {
               Melden Sie sich mit Ihrem Konto an
             </p>
           </div>
+
+          {showRegisteredMessage && (
+            <div className="mb-4 rounded-md bg-green-500/10 p-3 text-sm text-green-600">
+              Registrierung erfolgreich! Sie können sich jetzt anmelden.
+            </div>
+          )}
 
           {error && (
             <div className="mb-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
@@ -61,6 +79,8 @@ export default function LoginPage() {
                 className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 placeholder="name@beispiel.de"
                 required
+                autoComplete="email"
+                disabled={isLoading}
               />
             </div>
 
@@ -76,6 +96,8 @@ export default function LoginPage() {
                 className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 placeholder="••••••••"
                 required
+                autoComplete="current-password"
+                disabled={isLoading}
               />
             </div>
 
@@ -83,7 +105,10 @@ export default function LoginPage() {
               <label className="flex items-center">
                 <input
                   type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
                   className="h-4 w-4 rounded border-input text-primary focus:ring-primary"
+                  disabled={isLoading}
                 />
                 <span className="ml-2 text-sm text-muted-foreground">Angemeldet bleiben</span>
               </label>
@@ -100,7 +125,14 @@ export default function LoginPage() {
               disabled={isLoading}
               className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {isLoading ? 'Wird angemeldet...' : 'Anmelden'}
+              {isLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
+                  Wird angemeldet...
+                </span>
+              ) : (
+                'Anmelden'
+              )}
             </button>
           </form>
 
