@@ -60,7 +60,7 @@ func main() {
 		CacheDir:   cfg.Federation.CacheDir,
 		BatchSize:  500,
 		Workers:    4,
-		FilterDACH: true,
+		FilterDACH: false,
 		MinRating:  0,
 	}, log.Logger)
 	fideScheduler := fide.NewScheduler(fideImporter, cfg.Federation.FideSyncInterval, log.Logger)

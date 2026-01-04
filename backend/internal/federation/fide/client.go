@@ -1,12 +1,14 @@
 package fide
 
 import (
+	"archive/zip"
 	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -156,19 +158,68 @@ func (c *Client) downloadFile(url, filename string) (*DownloadResult, error) {
 
 // ExtractZip extracts a zip file and returns the path to the extracted XML file
 func (c *Client) ExtractZip(zipPath string) (string, error) {
-	// For FIDE files, we'll use archive/zip
-	// Implementation depends on the actual file format
-	// FIDE uses standard ZIP compression
-
 	c.logger.Info().Str("zip", zipPath).Msg("Extracting FIDE zip file")
 
-	// The extracted file will be in the same directory
-	dir := filepath.Dir(zipPath)
-	xmlPath := filepath.Join(dir, "players.xml")
+	// Open the zip file
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open zip file: %w", err)
+	}
+	defer r.Close()
 
-	// Use system unzip or archive/zip
-	// For now, return the expected path
-	return xmlPath, nil
+	dir := filepath.Dir(zipPath)
+	var xmlPath string
+
+	// Find and extract the XML file
+	for _, f := range r.File {
+		// Skip directories
+		if f.FileInfo().IsDir() {
+			continue
+		}
+
+		// Look for XML files
+		if strings.HasSuffix(strings.ToLower(f.Name), ".xml") {
+			c.logger.Info().
+				Str("file", f.Name).
+				Int64("size", int64(f.UncompressedSize64)).
+				Msg("Found XML file in zip")
+
+			// Extract the XML file
+			xmlPath = filepath.Join(dir, filepath.Base(f.Name))
+
+			// Open the file inside the zip
+			rc, err := f.Open()
+			if err != nil {
+				return "", fmt.Errorf("failed to open file in zip: %w", err)
+			}
+
+			// Create the output file
+			outFile, err := os.Create(xmlPath)
+			if err != nil {
+				rc.Close()
+				return "", fmt.Errorf("failed to create output file: %w", err)
+			}
+
+			// Copy the contents
+			written, err := io.Copy(outFile, rc)
+			outFile.Close()
+			rc.Close()
+
+			if err != nil {
+				return "", fmt.Errorf("failed to extract file: %w", err)
+			}
+
+			c.logger.Info().
+				Str("file", xmlPath).
+				Int64("bytes", written).
+				Msg("Extracted XML file")
+
+			// Return the first XML file found
+			return xmlPath, nil
+		}
+	}
+
+	return "", fmt.Errorf("no XML file found in zip archive")
 }
 
 // StreamReader creates a streaming reader for large XML files
