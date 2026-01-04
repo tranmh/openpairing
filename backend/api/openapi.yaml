@@ -1,0 +1,677 @@
+openapi: 3.0.3
+info:
+  title: OpenPairing API
+  description: |
+    Chess Tournament Management Platform API for the DACH region.
+
+    ## Features
+    - User authentication with JWT
+    - Tournament management (Swiss, Round Robin, Team)
+    - Player database with FIDE/DWZ/ÖSB integration
+    - Real-time game play via WebSocket
+    - Federation reporting (TRF, DWZ submission)
+
+    ## Authentication
+    Most endpoints require authentication via Bearer token.
+    Use the `/auth/login` endpoint to obtain an access token.
+  version: 1.0.0
+  license:
+    name: AGPL-3.0
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+  contact:
+    name: OpenPairing Team
+    url: https://github.com/openpairing/openpairing
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Development server
+  - url: https://api.openpairing.com/v1
+    description: Production server
+
+tags:
+  - name: auth
+    description: Authentication operations
+  - name: players
+    description: Player management
+  - name: tournaments
+    description: Tournament management
+  - name: games
+    description: Online game operations
+  - name: teams
+    description: Team management
+  - name: organizations
+    description: Organization management
+
+paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Register a new user
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Login and obtain tokens
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Logout and revoke tokens
+      operationId: logout
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Logged out successfully
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Refresh access token
+      operationId: refreshToken
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Get current user
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /players:
+    get:
+      tags: [players]
+      summary: Search players
+      operationId: searchPlayers
+      parameters:
+        - name: q
+          in: query
+          description: Search query (name, FIDE ID, DSB ID)
+          schema:
+            type: string
+        - name: federation
+          in: query
+          schema:
+            type: string
+            enum: [fide, dsb, oesb]
+        - name: minRating
+          in: query
+          schema:
+            type: integer
+        - name: maxRating
+          in: query
+          schema:
+            type: integer
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: List of players
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  players:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Player'
+                  total:
+                    type: integer
+
+  /players/{id}:
+    get:
+      tags: [players]
+      summary: Get player by ID
+      operationId: getPlayer
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Player details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Player'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tournaments:
+    get:
+      tags: [tournaments]
+      summary: List tournaments
+      operationId: listTournaments
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, published, registration, ongoing, completed, cancelled]
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [swiss, round_robin, knockout, team_swiss]
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: List of tournaments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tournaments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tournament'
+                  total:
+                    type: integer
+
+    post:
+      tags: [tournaments]
+      summary: Create tournament
+      operationId: createTournament
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTournamentRequest'
+      responses:
+        '201':
+          description: Tournament created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tournament'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /tournaments/{id}:
+    get:
+      tags: [tournaments]
+      summary: Get tournament by ID
+      operationId: getTournament
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Tournament details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tournament'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tournaments/{id}/participants:
+    get:
+      tags: [tournaments]
+      summary: Get tournament participants
+      operationId: getTournamentParticipants
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of participants
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  participants:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TournamentParticipant'
+
+    post:
+      tags: [tournaments]
+      summary: Register for tournament
+      operationId: registerForTournament
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                playerId:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Registered successfully
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /tournaments/{id}/standings:
+    get:
+      tags: [tournaments]
+      summary: Get tournament standings
+      operationId: getTournamentStandings
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Tournament standings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  standings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TournamentParticipant'
+
+  /tournaments/{id}/rounds/{roundNumber}/pairings:
+    get:
+      tags: [tournaments]
+      summary: Get round pairings
+      operationId: getRoundPairings
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: roundNumber
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Round pairings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pairings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Game'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        default: 1
+        minimum: 1
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            message:
+              type: string
+            code:
+              type: string
+            details:
+              type: object
+              additionalProperties:
+                type: string
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [player, arbiter, organizer, admin]
+        preferredLanguage:
+          type: string
+          enum: [de, en]
+        emailVerified:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    RegisterRequest:
+      type: object
+      required: [email, password, firstName, lastName]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        firstName:
+          type: string
+        lastName:
+          type: string
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    LoginResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        accessToken:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+
+    Player:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        firstName:
+          type: string
+        lastName:
+          type: string
+        fideId:
+          type: string
+        dsbId:
+          type: string
+        oesbId:
+          type: string
+        fideStandard:
+          type: integer
+        fideRapid:
+          type: integer
+        fideBlitz:
+          type: integer
+        dwz:
+          type: integer
+        dwzIndex:
+          type: integer
+        oesbElo:
+          type: integer
+        fideTitle:
+          type: string
+          enum: [GM, IM, FM, CM, WGM, WIM, WFM, WCM]
+        clubName:
+          type: string
+        federation:
+          type: string
+
+    Tournament:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        type:
+          type: string
+          enum: [swiss, round_robin, knockout, team_swiss]
+        mode:
+          type: string
+          enum: [otb, online, hybrid]
+        timeControl:
+          type: string
+        rounds:
+          type: integer
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [draft, published, registration, ongoing, completed, cancelled]
+        fideRated:
+          type: boolean
+        dwzRated:
+          type: boolean
+        oesbRated:
+          type: boolean
+        pairingEngine:
+          type: string
+          enum: [javafo, bbp]
+        tiebreaks:
+          type: array
+          items:
+            type: string
+
+    CreateTournamentRequest:
+      type: object
+      required: [name, type, mode, rounds, startDate]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [swiss, round_robin, knockout, team_swiss]
+        mode:
+          type: string
+          enum: [otb, online, hybrid]
+        timeControl:
+          type: string
+        rounds:
+          type: integer
+          minimum: 1
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        maxPlayers:
+          type: integer
+        fideRated:
+          type: boolean
+        dwzRated:
+          type: boolean
+
+    TournamentParticipant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        player:
+          $ref: '#/components/schemas/Player'
+        startRank:
+          type: integer
+        startingRating:
+          type: integer
+        points:
+          type: number
+        buchholz:
+          type: number
+        buchholzCut1:
+          type: number
+        sonnebornBerger:
+          type: number
+        wins:
+          type: integer
+        draws:
+          type: integer
+        losses:
+          type: integer
+        isActive:
+          type: boolean
+
+    Game:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        boardNumber:
+          type: integer
+        whiteParticipant:
+          $ref: '#/components/schemas/TournamentParticipant'
+        blackParticipant:
+          $ref: '#/components/schemas/TournamentParticipant'
+        result:
+          type: string
+          enum: ['1-0', '0-1', '1/2-1/2', '1-0F', '0-1F', '0-0F', 'BYE']
+        status:
+          type: string
+          enum: [scheduled, ongoing, completed, adjourned]
+        pgn:
+          type: string

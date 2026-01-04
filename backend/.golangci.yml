@@ -1,0 +1,93 @@
+run:
+  timeout: 5m
+  go: "1.22"
+  tests: true
+  skip-dirs:
+    - vendor
+    - bin
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    - gofmt
+    - goimports
+    - gocritic
+    - gosec
+    - misspell
+    - unconvert
+    - unparam
+    - nakedret
+    - prealloc
+    - exportloopref
+    - whitespace
+    - bodyclose
+    - noctx
+    - rowserrcheck
+    - sqlclosecheck
+    - contextcheck
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  govet:
+    check-shadowing: true
+    enable-all: true
+
+  gosec:
+    excludes:
+      - G104 # Audit errors not checked
+    config:
+      global:
+        audit: enabled
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+
+  misspell:
+    locale: US
+
+  nakedret:
+    max-func-lines: 30
+
+  goimports:
+    local-prefixes: github.com/openpairing/openpairing
+
+issues:
+  exclude-rules:
+    # Allow init functions
+    - linters:
+        - gochecknoinits
+      text: "init function"
+
+    # Allow underscores in test package names
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - funlen
+
+    # Allow longer functions in main
+    - path: cmd/
+      linters:
+        - funlen
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
