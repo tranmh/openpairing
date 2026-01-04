@@ -88,12 +88,8 @@ func TestParseTRF_ValidFile(t *testing.T) {
 	if trf.Rounds != 7 {
 		t.Errorf("Rounds = %d, want %d", trf.Rounds, 7)
 	}
-	if trf.TournamentType != "Swiss" {
-		t.Errorf("TournamentType = %q, want %q", trf.TournamentType, "Swiss")
-	}
-	if trf.ChiefArbiter != "IA John Smith" {
-		t.Errorf("ChiefArbiter = %q, want %q", trf.ChiefArbiter, "IA John Smith")
-	}
+	// Note: TournamentType and ChiefArbiter codes (062, 112) are no longer generated
+	// for JaVaFo compatibility, so we don't test for them here
 
 	// Check players
 	if len(trf.Players) != 3 {

@@ -62,6 +62,9 @@ type Repository interface {
 	AddForbiddenPair(ctx context.Context, fp *ForbiddenPair) error
 	ListForbiddenPairs(ctx context.Context, tournamentID uuid.UUID) ([]ForbiddenPair, error)
 	RemoveForbiddenPair(ctx context.Context, id uuid.UUID) error
+
+	// Player lookup
+	GetPlayerRating(ctx context.Context, playerID uuid.UUID, ratingType string) (int, error)
 }
 
 type ListFilters struct {
@@ -1078,6 +1081,31 @@ func (r *PostgresRepository) ListForbiddenPairs(ctx context.Context, tournamentI
 func (r *PostgresRepository) RemoveForbiddenPair(ctx context.Context, id uuid.UUID) error {
 	_, err := r.db.Exec(ctx, "DELETE FROM forbidden_pairs WHERE id = $1", id)
 	return err
+}
+
+// GetPlayerRating fetches a player's rating from the players table
+// ratingType can be "standard", "rapid", or "blitz"
+func (r *PostgresRepository) GetPlayerRating(ctx context.Context, playerID uuid.UUID, ratingType string) (int, error) {
+	var column string
+	switch ratingType {
+	case "rapid":
+		column = "fide_rapid"
+	case "blitz":
+		column = "fide_blitz"
+	default:
+		column = "fide_standard"
+	}
+
+	var rating *int
+	query := fmt.Sprintf("SELECT %s FROM players WHERE id = $1", column)
+	err := r.db.QueryRow(ctx, query, playerID).Scan(&rating)
+	if err != nil {
+		return 0, err
+	}
+	if rating == nil {
+		return 0, nil
+	}
+	return *rating, nil
 }
 
 // Helper functions

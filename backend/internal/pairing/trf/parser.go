@@ -158,9 +158,20 @@ func (p *Parser) Parse(reader io.Reader) (*TRFFile, error) {
 			}
 			trf.Teams = append(trf.Teams, team)
 		case "XXR":
-			playerNo, xxrData := p.parseXXRLine(line)
-			if playerNo > 0 {
-				trf.XXRRecords[playerNo] = xxrData
+			// XXR can be either:
+			// - Global round count: "XXR 5" (number of rounds)
+			// - Player-specific: "XXR    1 data" (player number + data)
+			if len(content) > 0 {
+				// Check if it's a simple number (round count)
+				if rounds, err := strconv.Atoi(strings.TrimSpace(content)); err == nil && rounds > 0 && len(content) < 5 {
+					trf.Rounds = rounds
+				} else {
+					// Try parsing as player-specific XXR
+					playerNo, xxrData := p.parseXXRLine(line)
+					if playerNo > 0 {
+						trf.XXRRecords[playerNo] = xxrData
+					}
+				}
 			}
 		case "XXC":
 			trf.XXCRecords = append(trf.XXCRecords, content)
@@ -171,15 +182,14 @@ func (p *Parser) Parse(reader io.Reader) (*TRFFile, error) {
 }
 
 // parsePlayerLine parses a 001 player line
-// Format matches generator output:
-// 001 SSSS S TTT NAME_____________________________RTNG FED FIDE_ID____BDAY______PTS_RANK rounds...
-// Positions (0-indexed):
-// 0-3: "001 ", 4-7: start number, 8: space, 9: sex, 10: space
-// 11-13: title, 14: space, 15-47: name (33 chars)
-// 48-51: rating, 52: space, 53-55: federation, 56: space
-// 57-67: FIDE ID (11 chars), 68-77: birth date (10 chars)
-// 78-81: points, 82: space, 83-86: rank
-// 87+: round results (8 chars each)
+// Format: TRF16 (FIDE standard)
+// Positions (1-indexed per TRF16, converted to 0-indexed for Go):
+//   1-3 (0-2): "001", 5-8 (4-7): start number, 10 (9): sex
+//   11-13 (10-12): title, 15-47 (14-46): name (33 chars)
+//   49-52 (48-51): rating, 54-56 (53-55): federation
+//   58-68 (57-67): FIDE ID (11 chars), 70-79 (69-78): birth date (10 chars)
+//   81-84 (80-83): points, 86-89 (85-88): rank
+//   91+ (90+): round results (10 chars each)
 func (p *Parser) parsePlayerLine(line string) (TRFPlayer, error) {
 	player := TRFPlayer{}
 
@@ -188,66 +198,66 @@ func (p *Parser) parsePlayerLine(line string) (TRFPlayer, error) {
 		line = line + strings.Repeat(" ", 48-len(line))
 	}
 
-	// Start number (columns 4-7, 0-indexed)
+	// Start number (TRF16 positions 5-8, 0-indexed 4-7)
 	startNo, err := strconv.Atoi(strings.TrimSpace(line[4:8]))
 	if err != nil {
 		return player, fmt.Errorf("invalid start number: %w", err)
 	}
 	player.StartNo = startNo
 
-	// Sex (column 9)
+	// Sex (TRF16 position 10, 0-indexed 9)
 	if len(line) > 9 {
 		player.Sex = strings.TrimSpace(string(line[9]))
 	}
 
-	// Title (columns 11-13)
-	if len(line) > 14 {
-		player.Title = strings.TrimSpace(line[11:14])
+	// Title (TRF16 positions 11-13, 0-indexed 10-12)
+	if len(line) > 12 {
+		player.Title = strings.TrimSpace(line[10:13])
 	}
 
-	// Name (columns 15-47, 33 chars)
-	if len(line) > 47 {
-		player.Name = strings.TrimSpace(line[15:48])
+	// Name (TRF16 positions 15-47, 0-indexed 14-46, 33 chars)
+	if len(line) > 46 {
+		player.Name = strings.TrimSpace(line[14:47])
 	}
 
-	// Rating (columns 48-51)
+	// Rating (TRF16 positions 49-52, 0-indexed 48-51)
 	if len(line) > 51 {
 		rating, _ := strconv.Atoi(strings.TrimSpace(line[48:52]))
 		player.Rating = rating
 	}
 
-	// Federation (columns 53-55)
+	// Federation (TRF16 positions 54-56, 0-indexed 53-55)
 	if len(line) > 55 {
 		player.Federation = strings.TrimSpace(line[53:56])
 	}
 
-	// FIDE ID (columns 57-67, 11 chars)
+	// FIDE ID (TRF16 positions 58-68, 0-indexed 57-67, 11 chars)
 	if len(line) > 67 {
 		player.FideID = strings.TrimSpace(line[57:68])
 	}
 
-	// Birth date (columns 68-77, 10 chars)
-	if len(line) > 77 {
-		player.BirthDate = strings.TrimSpace(line[68:78])
+	// Birth date (TRF16 positions 70-79, 0-indexed 69-78, 10 chars)
+	if len(line) > 78 {
+		player.BirthDate = strings.TrimSpace(line[69:79])
 	}
 
-	// Points (columns 78-81, 4 chars)
-	if len(line) > 81 {
-		pointsStr := strings.TrimSpace(line[78:82])
+	// Points (TRF16 positions 81-84, 0-indexed 80-83, 4 chars)
+	if len(line) > 83 {
+		pointsStr := strings.TrimSpace(line[80:84])
 		points, _ := strconv.ParseFloat(pointsStr, 64)
 		player.Points = points
 	}
 
-	// Rank (columns 83-86, 4 chars)
-	if len(line) > 86 {
-		rank, _ := strconv.Atoi(strings.TrimSpace(line[83:87]))
+	// Rank (TRF16 positions 86-89, 0-indexed 85-88, 4 chars)
+	if len(line) > 88 {
+		rank, _ := strconv.Atoi(strings.TrimSpace(line[85:89]))
 		player.Rank = rank
 	}
 
-	// Round results start at column 87
-	// Each round result is 8 characters: "  c r ooo"
-	roundStart := 87
-	roundWidth := 8
+	// Round results start at TRF16 position 92 (0-indexed 91)
+	// Each round result is 10 characters per TRF16
+	roundStart := 91
+	roundWidth := 10
 	roundNum := 1
 
 	for i := roundStart; i+roundWidth <= len(line); i += roundWidth {
@@ -261,55 +271,59 @@ func (p *Parser) parsePlayerLine(line string) (TRFPlayer, error) {
 }
 
 // parseRoundResult parses a single round result
-// TRF format: 8 characters per round: "  c r ooo"
-// Position 2: color (w/b/-)
-// Position 4: result (1/0/=/+/-/H/F/U/Z)
-// Positions 5-7: opponent number (3 digits, right-justified)
+// TRF16 format: 10 characters per round: " OOOO c r "
+// Position 1 (0): space
+// Positions 2-5 (1-4): opponent number (4 digits, right-justified)
+// Position 6 (5): space
+// Position 7 (6): color (w/b/-)
+// Position 8 (7): space
+// Position 9 (8): result (1/0/=/+/-/H/F/U/Z/W/D/L)
+// Position 10 (9): space
 func (p *Parser) parseRoundResult(round int, data string) TRFRoundResult {
 	result := TRFRoundResult{Round: round}
 
-	if len(data) < 8 {
-		data = data + strings.Repeat(" ", 8-len(data))
+	if len(data) < 10 {
+		data = data + strings.Repeat(" ", 10-len(data))
 	}
 
-	// Color is at position 2 (0-indexed)
-	if len(data) > 2 {
-		color := string(data[2])
+	// Opponent number at positions 2-5 (0-indexed 1-4), 4 digits right-justified
+	if len(data) > 4 {
+		oppStr := strings.TrimSpace(data[1:5])
+		if oppStr != "" && oppStr != "0" && oppStr != "0000" {
+			opp, _ := strconv.Atoi(oppStr)
+			result.OpponentNo = opp
+		}
+	}
+
+	// Color at position 7 (0-indexed 6)
+	if len(data) > 6 {
+		color := string(data[6])
 		if color == "w" || color == "b" || color == "-" {
 			result.Color = color
 		}
 	}
 
-	// Result is at position 4
-	if len(data) > 4 {
-		resultChar := string(data[4])
+	// Result at position 9 (0-indexed 8)
+	if len(data) > 8 {
+		resultChar := string(data[8])
 		switch resultChar {
 		case "1", "+", "W":
 			result.Result = "1"
 		case "0", "L":
 			result.Result = "0"
 		case "-":
-			// Could be loss or unpaired - check if we have an opponent
+			// Forfeit loss or unpaired
 			result.Result = "0"
 		case "=", "D":
 			result.Result = "="
 		case "H": // Half-point bye
 			result.Result = "H"
-		case "F": // Forfeit win
+		case "F": // Forfeit win / full-point bye
 			result.Result = "F"
-		case "U": // Unpaired
+		case "U": // Pairing-allocated bye (unpaired by system)
 			result.Result = "U"
-		case "Z": // Zero-point bye
+		case "Z": // Zero-point bye (known absence)
 			result.Result = "Z"
-		}
-	}
-
-	// Opponent number is at positions 5-7 (3 digits, right-justified)
-	if len(data) >= 8 {
-		oppStr := strings.TrimSpace(data[5:8])
-		if oppStr != "" && oppStr != "000" {
-			opp, _ := strconv.Atoi(oppStr)
-			result.OpponentNo = opp
 		}
 	}
 

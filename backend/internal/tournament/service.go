@@ -371,6 +371,22 @@ func (s *Service) RegisterParticipant(ctx context.Context, tournamentID uuid.UUI
 		return nil, fmt.Errorf("player already registered")
 	}
 
+	// Auto-fetch player rating if not provided
+	startingRating := req.StartingRating
+	if startingRating == 0 {
+		// Determine rating type based on tournament time control
+		ratingType := "standard"
+		if tournament.TimeControlType == TimeControlRapid {
+			ratingType = "rapid"
+		} else if tournament.TimeControlType == TimeControlBlitz {
+			ratingType = "blitz"
+		}
+		fetchedRating, err := s.repo.GetPlayerRating(ctx, req.PlayerID, ratingType)
+		if err == nil && fetchedRating > 0 {
+			startingRating = fetchedRating
+		}
+	}
+
 	participant := &Participant{
 		ID:                 uuid.New(),
 		TournamentID:       tournamentID,
@@ -378,7 +394,7 @@ func (s *Service) RegisterParticipant(ctx context.Context, tournamentID uuid.UUI
 		PlayerID:           req.PlayerID,
 		RegistrationStatus: "registered",
 		RegisteredAt:       time.Now(),
-		StartingRating:     req.StartingRating,
+		StartingRating:     startingRating,
 		IsActive:           true,
 		PaymentStatus:      "pending",
 	}
@@ -495,6 +511,28 @@ func (s *Service) GeneratePairings(ctx context.Context, tournamentID uuid.UUID, 
 		return nil, fmt.Errorf("pairing engine not configured - set JAVAFO_PATH environment variable")
 	}
 
+	// Auto-assign start ranks if not already assigned (required for round 1)
+	participants, err := s.GetParticipants(ctx, tournamentID, &ParticipantFilter{
+		ActiveOnly: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	needsRanks := false
+	for _, p := range participants {
+		if p.StartRank == 0 {
+			needsRanks = true
+			break
+		}
+	}
+
+	if needsRanks {
+		if err := s.AssignStartRanks(ctx, tournamentID); err != nil {
+			return nil, fmt.Errorf("failed to assign start ranks: %w", err)
+		}
+	}
+
 	// Generate TRF for pairing engine
 	trfData, err := s.generateTRFForPairing(ctx, tournament, roundNumber)
 	if err != nil {
@@ -513,8 +551,8 @@ func (s *Service) GeneratePairings(ctx context.Context, tournamentID uuid.UUID, 
 		return nil, fmt.Errorf("pairing engine failed: %w", err)
 	}
 
-	// Convert pairings to games
-	participants, err := s.GetParticipants(ctx, tournamentID, &ParticipantFilter{
+	// Convert pairings to games (re-fetch participants to get updated ranks if assigned)
+	participants, err = s.GetParticipants(ctx, tournamentID, &ParticipantFilter{
 		ActiveOnly: true,
 	})
 	if err != nil {

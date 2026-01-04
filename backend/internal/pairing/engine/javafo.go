@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,6 +91,9 @@ func (j *JaVaFo) GeneratePairings(ctx context.Context, req *PairingRequest) (*Pa
 		return nil, fmt.Errorf("failed to write input file: %w", err)
 	}
 
+	// Debug: Log TRF content
+	j.logger.Debug().Str("trf_content", req.TRFData).Msg("Generated TRF for JaVaFo")
+
 	// Prepare output path
 	outputPath := filepath.Join(tmpDir, "output.trf")
 
@@ -123,29 +127,70 @@ func (j *JaVaFo) GeneratePairings(ctx context.Context, req *PairingRequest) (*Pa
 		return nil, fmt.Errorf("JaVaFo execution failed: %w - %s", err, stderr.String())
 	}
 
-	// Read output TRF
+	// Read output file - JaVaFo outputs compact pairing format with -p flag
 	outputData, err := os.ReadFile(outputPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read output file: %w", err)
 	}
 
-	// Parse output to extract pairings
-	parser := trf.NewParser()
-	outputTRF, err := parser.Parse(strings.NewReader(string(outputData)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse output TRF: %w", err)
+	// Parse JaVaFo compact pairing format:
+	// Line 1: number of pairings
+	// Following lines: white_startno black_startno (or just startno for bye)
+	lines := strings.Split(strings.TrimSpace(string(outputData)), "\n")
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("empty output from JaVaFo")
 	}
 
-	// Extract pairings for the requested round
-	trfPairings := outputTRF.GetPairings(req.RoundNumber)
+	var pairings []Pairing
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
 
-	pairings := make([]Pairing, len(trfPairings))
-	for i, p := range trfPairings {
-		pairings[i] = Pairing{
-			Board:        p.Board,
-			WhiteStartNo: p.White,
-			BlackStartNo: p.Black,
-			IsBye:        p.IsBye,
+		// First line is the number of pairings, skip it
+		if i == 0 {
+			continue
+		}
+
+		parts := strings.Fields(line)
+		if len(parts) == 0 {
+			continue
+		}
+
+		board := i // Board number is 1-indexed from line position
+
+		if len(parts) == 1 {
+			// Bye: single player number
+			startNo, err := strconv.Atoi(parts[0])
+			if err != nil {
+				j.logger.Warn().Str("line", line).Msg("Invalid bye pairing line")
+				continue
+			}
+			pairings = append(pairings, Pairing{
+				Board:        board,
+				WhiteStartNo: startNo,
+				BlackStartNo: 0,
+				IsBye:        true,
+			})
+		} else if len(parts) >= 2 {
+			// Regular pairing: white black
+			white, err := strconv.Atoi(parts[0])
+			if err != nil {
+				j.logger.Warn().Str("line", line).Msg("Invalid pairing line (white)")
+				continue
+			}
+			black, err := strconv.Atoi(parts[1])
+			if err != nil {
+				j.logger.Warn().Str("line", line).Msg("Invalid pairing line (black)")
+				continue
+			}
+			pairings = append(pairings, Pairing{
+				Board:        board,
+				WhiteStartNo: white,
+				BlackStartNo: black,
+				IsBye:        false,
+			})
 		}
 	}
 

@@ -95,29 +95,11 @@ func (g *Generator) Generate() string {
 		lines = append(lines, fmt.Sprintf("052 %s", g.trf.EndDate))
 	}
 
-	lines = append(lines, fmt.Sprintf("062 %d", g.trf.Rounds))
+	// Note: Standard TRF16 header codes (062, 072, 082, 092, 102, 112) are intentionally
+	// omitted here because JaVaFo fails when it encounters unrecognized codes.
+	// Both JaVaFo and bbpPairings work correctly with just the XXR record for rounds.
 
-	if g.trf.TournamentType != "" {
-		lines = append(lines, fmt.Sprintf("072 %s", g.trf.TournamentType))
-	}
-
-	if g.trf.ChiefArbiter != "" {
-		lines = append(lines, fmt.Sprintf("082 %s", g.trf.ChiefArbiter))
-	}
-
-	for _, deputy := range g.trf.DeputyArbiters {
-		lines = append(lines, fmt.Sprintf("092 %s", deputy))
-	}
-
-	if g.trf.TimeControl != "" {
-		lines = append(lines, fmt.Sprintf("102 %s", g.trf.TimeControl))
-	}
-
-	if len(g.trf.RoundDates) > 0 {
-		lines = append(lines, fmt.Sprintf("112 %s", strings.Join(g.trf.RoundDates, " ")))
-	}
-
-	// XXR record - number of rounds (required by bbpPairings)
+	// XXR record - number of rounds (required by both JaVaFo and bbpPairings)
 	if g.trf.Rounds > 0 {
 		lines = append(lines, fmt.Sprintf("XXR %d", g.trf.Rounds))
 	}
@@ -150,43 +132,108 @@ func (g *Generator) Generate() string {
 }
 
 // generatePlayerLine generates a 001 line for a player
-// Format compatible with bbpPairings TRF(x) format:
-// Positions: 0-2="001", 4-7=startno, 8-13=spaces, 14-47=name, 48-51=rating,
-//            52-79=spaces, 80-83=points, 84-87=spaces, 88+=rank, then round results
+// Format: TRF16 (FIDE standard) - compatible with both JaVaFo and bbpPairings
+// Positions (1-indexed as per TRF16 spec):
+//   1-3: "001", 5-8: startno, 10: sex, 11-13: title, 15-47: name,
+//   49-52: rating, 54-56: federation, 58-68: FIDE ID, 70-79: birth date,
+//   81-84: points, 86-89: rank, 91+: round results
 func (g *Generator) generatePlayerLine(player TRFPlayer) string {
-	// Start with "001" and 4-char right-justified start number
-	line := fmt.Sprintf("001 %4d", player.StartNo)
+	// Build line with fixed-width fields per TRF16 spec
+	// Using 0-indexed positions (TRF16 pos - 1)
 
-	// 6 spaces (positions 8-13)
-	line += "      "
+	// Positions 1-3: "001" (0-2 in 0-indexed)
+	line := "001"
 
-	// Name (34 chars, left-padded, positions 14-47)
-	name := player.Name
-	if len(name) > 34 {
-		name = name[:34]
+	// Position 4: space
+	line += " "
+
+	// Positions 5-8: Starting rank number (4 digits, right-justified)
+	line += fmt.Sprintf("%4d", player.StartNo)
+
+	// Position 9: space
+	line += " "
+
+	// Position 10: Sex (m/w/blank)
+	if player.Sex != "" {
+		line += string(player.Sex[0])
+	} else {
+		line += " "
 	}
-	line += fmt.Sprintf("%-34s", name)
 
-	// Rating (4 digits, positions 48-51)
+	// Positions 11-13: Title (3 chars, left-justified)
+	title := player.Title
+	if len(title) > 3 {
+		title = title[:3]
+	}
+	line += fmt.Sprintf("%-3s", title)
+
+	// Position 14: space
+	line += " "
+
+	// Positions 15-47: Name (33 chars, left-justified)
+	name := player.Name
+	if len(name) > 33 {
+		name = name[:33]
+	}
+	line += fmt.Sprintf("%-33s", name)
+
+	// Position 48: space
+	line += " "
+
+	// Positions 49-52: FIDE Rating (4 digits, right-justified)
 	if player.Rating > 0 {
 		line += fmt.Sprintf("%4d", player.Rating)
 	} else {
 		line += "    "
 	}
 
-	// 28 spaces for federation/FIDE ID/birth date (positions 52-79)
-	line += "                            "
+	// Position 53: space
+	line += " "
 
-	// Points (4 chars with 1 decimal, positions 80-83)
+	// Positions 54-56: FIDE Federation (3 chars)
+	fed := player.Federation
+	if len(fed) > 3 {
+		fed = fed[:3]
+	}
+	line += fmt.Sprintf("%-3s", fed)
+
+	// Position 57: space
+	line += " "
+
+	// Positions 58-68: FIDE Number (11 chars, right-justified)
+	fideID := player.FideID
+	if len(fideID) > 11 {
+		fideID = fideID[:11]
+	}
+	line += fmt.Sprintf("%11s", fideID)
+
+	// Position 69: space
+	line += " "
+
+	// Positions 70-79: Birth Date (10 chars, YYYY/MM/DD)
+	birthDate := player.BirthDate
+	if len(birthDate) > 10 {
+		birthDate = birthDate[:10]
+	}
+	line += fmt.Sprintf("%-10s", birthDate)
+
+	// Position 80: space
+	line += " "
+
+	// Positions 81-84: Points (4 chars with 1 decimal, right-justified)
 	line += fmt.Sprintf("%4.1f", player.Points)
 
-	// 4 spaces (positions 84-87)
-	line += "    "
+	// Position 85: space
+	line += " "
 
-	// Rank (positions 88+)
-	line += fmt.Sprintf("%d", player.Rank)
+	// Positions 86-89: Rank (4 digits, right-justified)
+	line += fmt.Sprintf("%4d", player.Rank)
 
-	// Round results
+	// Positions 90-91: gap before rounds (2 spaces)
+	line += "  "
+
+	// Round results start at position 92 (index 91)
+	// Each round is 10 characters per TRF16
 	for _, result := range player.RoundResults {
 		line += g.generateRoundResult(result)
 	}
@@ -195,13 +242,9 @@ func (g *Generator) generatePlayerLine(player TRFPlayer) string {
 }
 
 // generateRoundResult generates the round result portion
-// Format compatible with bbpPairings: "    OO c r" (10 chars)
-// - 4 leading spaces
-// - opponent number (2+ digits, right-justified in remaining space)
-// - space
-// - color (w/b/-)
-// - space
-// - result (1/0/=/+/-/H/F/U/Z)
+// Format: TRF16 (FIDE standard) - 10 characters per round
+// Positions within each round block (1-indexed):
+//   1: space, 2-5: opponent number (4 digits), 6: space, 7: color, 8: space, 9: result, 10: space
 func (g *Generator) generateRoundResult(result TRFRoundResult) string {
 	color := result.Color
 	if color == "" {
@@ -214,17 +257,23 @@ func (g *Generator) generateRoundResult(result TRFRoundResult) string {
 	}
 
 	if result.OpponentNo > 0 {
-		// Format: 4 spaces + 2-char opponent (right-justified) + space + color + space + result
-		return fmt.Sprintf("    %2d %s %s", result.OpponentNo, color, resultChar)
+		// Regular game: " OOOO c r " (10 chars)
+		return fmt.Sprintf(" %4d %s %s ", result.OpponentNo, color, resultChar)
 	} else if result.Result == "F" || result.Result == "+" {
-		// Full-point bye (bbpPairings uses '+' for forfeit win / full bye)
-		return fmt.Sprintf("     0 - +")
-	} else if result.Result == "H" || result.Result == "Z" {
-		// Half-point or zero-point bye - use '-' which bbpPairings interprets as forfeit loss / 0 pts
-		return fmt.Sprintf("     0 - -")
+		// Full-point bye / forfeit win
+		return fmt.Sprintf(" %4d - + ", 0)
+	} else if result.Result == "H" {
+		// Half-point bye
+		return fmt.Sprintf(" %4d - H ", 0)
+	} else if result.Result == "Z" {
+		// Zero-point bye (known absence)
+		return fmt.Sprintf(" %4d - Z ", 0)
+	} else if result.Result == "U" {
+		// Pairing-allocated bye (unpaired by system)
+		return fmt.Sprintf(" %4d - U ", 0)
 	} else {
-		// Unpaired - use '-' for no result
-		return fmt.Sprintf("     0 - -")
+		// Default: zero-point bye
+		return fmt.Sprintf(" %4d - Z ", 0)
 	}
 }
 

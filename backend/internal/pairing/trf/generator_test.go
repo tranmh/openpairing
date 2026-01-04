@@ -32,21 +32,11 @@ func TestGenerator_Header(t *testing.T) {
 	if !strings.Contains(output, "052 2024/01/20") {
 		t.Errorf("Output should contain end date line")
 	}
-	if !strings.Contains(output, "062 7") {
-		t.Errorf("Output should contain rounds line")
+	// XXR record for rounds (instead of 062 which JaVaFo doesn't recognize)
+	if !strings.Contains(output, "XXR 7") {
+		t.Errorf("Output should contain XXR rounds line")
 	}
-	if !strings.Contains(output, "072 Swiss") {
-		t.Errorf("Output should contain tournament type line")
-	}
-	if !strings.Contains(output, "082 IA John Smith") {
-		t.Errorf("Output should contain chief arbiter line")
-	}
-	if !strings.Contains(output, "092 FA Deputy One") {
-		t.Errorf("Output should contain deputy arbiter line")
-	}
-	if !strings.Contains(output, "102 90+30") {
-		t.Errorf("Output should contain time control line")
-	}
+	// Note: 062, 072, 082, 092, 102 are intentionally omitted for JaVaFo compatibility
 }
 
 func TestGenerator_PlayerLine(t *testing.T) {
