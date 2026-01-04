@@ -1,9 +1,10 @@
-version: '3.8'
+# OpenPairing Docker Compose Configuration
+# Note: 'version' field is deprecated in Docker Compose V2+
 
 services:
   # PostgreSQL Database
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.4-alpine
     container_name: openpairing-postgres
     restart: unless-stopped
     environment:
@@ -19,12 +20,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - openpairing-internal
 
   # Redis Cache
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     container_name: openpairing-redis
     restart: unless-stopped
+    command: redis-server --appendonly yes
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -34,10 +38,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - openpairing-internal
 
   # MinIO (S3-compatible storage for development)
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
     container_name: openpairing-minio
     restart: unless-stopped
     environment:
@@ -50,10 +56,12 @@ services:
       - minio_data:/data
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 30s
       timeout: 20s
       retries: 3
+    networks:
+      - openpairing-internal
 
   # Backend API (Go)
   api:
@@ -63,10 +71,19 @@ services:
     container_name: openpairing-api
     restart: unless-stopped
     environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${POSTGRES_USER:-openpairing}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-openpairing_dev}
+      - DB_NAME=${POSTGRES_DB:-openpairing}
+      - DB_SSLMODE=disable
       - DATABASE_URL=postgres://${POSTGRES_USER:-openpairing}:${POSTGRES_PASSWORD:-openpairing_dev}@postgres:5432/${POSTGRES_DB:-openpairing}?sslmode=disable
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - REDIS_URL=redis://redis:6379
       - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
       - ENVIRONMENT=${ENVIRONMENT:-development}
+      - PORT=8080
     ports:
       - "${API_PORT:-8080}:8080"
     depends_on:
@@ -74,6 +91,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - openpairing-internal
     profiles:
       - full
 
@@ -85,13 +110,24 @@ services:
     container_name: openpairing-chess
     restart: unless-stopped
     environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - REDIS_URL=redis://redis:6379
       - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      - CHESS_PORT=8081
     ports:
       - "${CHESS_PORT:-8081}:8081"
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - openpairing-internal
     profiles:
       - full
 
@@ -103,17 +139,27 @@ services:
     container_name: openpairing-worker
     restart: unless-stopped
     environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${POSTGRES_USER:-openpairing}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-openpairing_dev}
+      - DB_NAME=${POSTGRES_DB:-openpairing}
+      - DB_SSLMODE=disable
       - DATABASE_URL=postgres://${POSTGRES_USER:-openpairing}:${POSTGRES_PASSWORD:-openpairing_dev}@postgres:5432/${POSTGRES_DB:-openpairing}?sslmode=disable
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - REDIS_URL=redis://redis:6379
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - openpairing-internal
     profiles:
       - full
 
-  # Frontend (Next.js) - Development
+  # Frontend (Next.js)
   frontend:
     build:
       context: ./frontend
@@ -123,10 +169,20 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:${API_PORT:-8080}
       - NEXT_PUBLIC_WS_URL=ws://localhost:${CHESS_PORT:-8081}
+      - NODE_ENV=production
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - openpairing-internal
     profiles:
       - full
 
@@ -136,5 +192,6 @@ volumes:
   minio_data:
 
 networks:
-  default:
+  openpairing-internal:
     name: openpairing-network
+    driver: bridge
