@@ -659,6 +659,19 @@ func (s *Service) generateTRFForPairing(ctx context.Context, tournament *Tournam
 				Round: g.BoardNumber, // This should be round number, needs fixing
 			}
 
+			// Handle BYE games
+			if *g.Result == "BYE" {
+				result.Color = "-"
+				if g.WhiteScore != nil && *g.WhiteScore == 1 {
+					result.Result = "F" // Full-point bye
+				} else {
+					result.Result = "H" // Half-point bye
+				}
+				result.OpponentNo = 0
+				player.RoundResults = append(player.RoundResults, result)
+				continue
+			}
+
 			// Determine color and opponent
 			if g.WhiteParticipantID != nil && *g.WhiteParticipantID == p.ID {
 				result.Color = "w"

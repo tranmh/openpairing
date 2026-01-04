@@ -150,70 +150,41 @@ func (g *Generator) Generate() string {
 }
 
 // generatePlayerLine generates a 001 line for a player
+// Format compatible with bbpPairings TRF(x) format:
+// Positions: 0-2="001", 4-7=startno, 8-13=spaces, 14-47=name, 48-51=rating,
+//            52-79=spaces, 80-83=points, 84-87=spaces, 88+=rank, then round results
 func (g *Generator) generatePlayerLine(player TRFPlayer) string {
-	// Fixed width fields according to TRF16 format
-	// 001 SSSS  S TT NAME                            RTNG FED FIDE_ID    BDATE      PTS  RANK
-	// Positions: 4-7=startno, 9=sex, 10-13=title, 14-46=name, 48-51=rating, 53-55=fed, 57-67=fideid, 69-78=bdate, 80-83=pts, 85-88=rank
+	// Start with "001" and 4-char right-justified start number
+	line := fmt.Sprintf("001 %4d", player.StartNo)
 
-	line := fmt.Sprintf("001 %4d ", player.StartNo)
+	// 6 spaces (positions 8-13)
+	line += "      "
 
-	// Sex
-	sex := player.Sex
-	if sex == "" {
-		sex = " "
-	}
-	line += sex + " "
-
-	// Title (3 chars, right-padded)
-	title := player.Title
-	if len(title) > 3 {
-		title = title[:3]
-	}
-	line += fmt.Sprintf("%-3s", title) + " "
-
-	// Name (33 chars, left-padded)
+	// Name (34 chars, left-padded, positions 14-47)
 	name := player.Name
-	if len(name) > 33 {
-		name = name[:33]
+	if len(name) > 34 {
+		name = name[:34]
 	}
-	line += fmt.Sprintf("%-33s", name)
+	line += fmt.Sprintf("%-34s", name)
 
-	// Rating (4 digits)
+	// Rating (4 digits, positions 48-51)
 	if player.Rating > 0 {
 		line += fmt.Sprintf("%4d", player.Rating)
 	} else {
 		line += "    "
 	}
-	line += " "
 
-	// Federation (3 chars)
-	fed := player.Federation
-	if len(fed) > 3 {
-		fed = fed[:3]
-	}
-	line += fmt.Sprintf("%-3s", fed)
-	line += " "
+	// 28 spaces for federation/FIDE ID/birth date (positions 52-79)
+	line += "                            "
 
-	// FIDE ID (11 chars)
-	fideID := player.FideID
-	if len(fideID) > 11 {
-		fideID = fideID[:11]
-	}
-	line += fmt.Sprintf("%-11s", fideID)
-
-	// Birth date (10 chars)
-	bdate := player.BirthDate
-	if len(bdate) > 10 {
-		bdate = bdate[:10]
-	}
-	line += fmt.Sprintf("%-10s", bdate)
-
-	// Points (4 chars with 1 decimal)
+	// Points (4 chars with 1 decimal, positions 80-83)
 	line += fmt.Sprintf("%4.1f", player.Points)
-	line += " "
 
-	// Rank (4 digits)
-	line += fmt.Sprintf("%4d", player.Rank)
+	// 4 spaces (positions 84-87)
+	line += "    "
+
+	// Rank (positions 88+)
+	line += fmt.Sprintf("%d", player.Rank)
 
 	// Round results
 	for _, result := range player.RoundResults {
@@ -224,14 +195,14 @@ func (g *Generator) generatePlayerLine(player TRFPlayer) string {
 }
 
 // generateRoundResult generates the round result portion
+// Format compatible with bbpPairings: "    OO c r" (10 chars)
+// - 4 leading spaces
+// - opponent number (2+ digits, right-justified in remaining space)
+// - space
+// - color (w/b/-)
+// - space
+// - result (1/0/=/+/-/H/F/U/Z)
 func (g *Generator) generateRoundResult(result TRFRoundResult) string {
-	// Format: "  c r ooo" (8 chars total)
-	// Position 0-1: padding spaces
-	// Position 2: color (w/b/-)
-	// Position 3: space
-	// Position 4: result (1/0/=/+/-/H/F/U/Z)
-	// Position 5-7: opponent number (3 digits, right-justified)
-
 	color := result.Color
 	if color == "" {
 		color = "-"
@@ -242,16 +213,18 @@ func (g *Generator) generateRoundResult(result TRFRoundResult) string {
 		resultChar = "-"
 	}
 
-	// TRF format: 4 chars opponent (right-justified) + space + color + space + result
-	// Total: 8 chars per round result
 	if result.OpponentNo > 0 {
-		return fmt.Sprintf("  %4d %s %s", result.OpponentNo, color, resultChar)
-	} else if result.Result == "H" || result.Result == "F" || result.Result == "Z" {
-		// Bye (H=half-point, F=full-point, Z=zero-point)
-		return fmt.Sprintf("       - %s", resultChar)
+		// Format: 4 spaces + 2-char opponent (right-justified) + space + color + space + result
+		return fmt.Sprintf("    %2d %s %s", result.OpponentNo, color, resultChar)
+	} else if result.Result == "F" || result.Result == "+" {
+		// Full-point bye (bbpPairings uses '+' for forfeit win / full bye)
+		return fmt.Sprintf("     0 - +")
+	} else if result.Result == "H" || result.Result == "Z" {
+		// Half-point or zero-point bye - use '-' which bbpPairings interprets as forfeit loss / 0 pts
+		return fmt.Sprintf("     0 - -")
 	} else {
-		// Unpaired
-		return fmt.Sprintf("       - U")
+		// Unpaired - use '-' for no result
+		return fmt.Sprintf("     0 - -")
 	}
 }
 
