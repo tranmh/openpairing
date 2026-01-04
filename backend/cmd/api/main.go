@@ -19,6 +19,7 @@ import (
 	"github.com/openpairing/openpairing/internal/federation/oesb"
 	"github.com/openpairing/openpairing/internal/federation/ssb"
 	"github.com/openpairing/openpairing/internal/middleware"
+	"github.com/openpairing/openpairing/internal/arbiter"
 	"github.com/openpairing/openpairing/internal/notification"
 	"github.com/openpairing/openpairing/internal/pairing/engine"
 	"github.com/openpairing/openpairing/internal/player"
@@ -136,8 +137,12 @@ func main() {
 	tournamentService := tournament.NewService(tournamentRepo, pairingEngine, log.Logger)
 	tournamentHandler := tournament.NewHandler(tournamentService, log.Logger)
 
+	// Arbiter service
+	arbiterService := arbiter.NewService(tournamentRepo, nil, log.Logger)
+	arbiterHandler := arbiter.NewHandler(arbiterService, log.Logger)
+
 	// Create Gin router
-	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler)
+	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler)
 
 	// Create server
 	srv := &http.Server{
@@ -191,7 +196,7 @@ func main() {
 	log.Info().Msg("Server exited")
 }
 
-func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler) *gin.Engine {
+func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler) *gin.Engine {
 	// Set Gin mode
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -243,6 +248,9 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 
 		// Tournament routes - use the tournament handler's RegisterRoutes
 		tournamentHandler.RegisterRoutes(v1, authMiddleware.Authenticate())
+
+		// Arbiter routes
+		arbiterHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireArbiter())
 
 		// Organization routes
 		orgs := v1.Group("/organizations")

@@ -285,11 +285,11 @@ export const tournamentsApi = {
   list: (params?: { status?: string; page?: number; limit?: number }) =>
     api.get<{ tournaments: Tournament[]; total: number }>('/tournaments', params as Record<string, string>),
 
-  get: (id: string) => api.get<Tournament>(`/tournaments/${id}`),
+  get: (id: string) => api.get<{ tournament: Tournament }>(`/tournaments/${id}`),
 
-  create: (data: Partial<Tournament>) => api.post<Tournament>('/tournaments', data),
+  create: (data: Partial<Tournament>) => api.post<{ tournament: Tournament }>('/tournaments', data),
 
-  update: (id: string, data: Partial<Tournament>) => api.put<Tournament>(`/tournaments/${id}`, data),
+  update: (id: string, data: Partial<Tournament>) => api.put<{ tournament: Tournament }>(`/tournaments/${id}`, data),
 
   delete: (id: string) => api.delete(`/tournaments/${id}`),
 
@@ -302,10 +302,10 @@ export const tournamentsApi = {
   getRounds: (id: string) => api.get<{ rounds: TournamentRound[] }>(`/tournaments/${id}/rounds`),
 
   getPairings: (id: string, roundNumber: number) =>
-    api.get<{ pairings: Game[] }>(`/tournaments/${id}/rounds/${roundNumber}/pairings`),
+    api.get<{ games: Game[] }>(`/tournaments/${id}/rounds/${roundNumber}/pairings`),
 
   generatePairings: (id: string, roundNumber: number) =>
-    api.post<{ pairings: Game[] }>(`/tournaments/${id}/rounds/${roundNumber}/pair`),
+    api.post<{ games: Game[] }>(`/tournaments/${id}/rounds/${roundNumber}/pair`),
 
   getStandings: (id: string) =>
     api.get<{ standings: TournamentParticipant[] }>(`/tournaments/${id}/standings`),

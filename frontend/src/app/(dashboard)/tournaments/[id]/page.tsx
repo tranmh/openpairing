@@ -605,12 +605,12 @@ function PairingsTab({
                 {games.map((game: any) => (
                   <tr key={game.id} className="border-b">
                     <td className="py-2 px-2 text-center">{game.boardNumber}</td>
-                    <td className="py-2 px-2">{game.whiteName || game.whiteParticipantId}</td>
+                    <td className="py-2 px-2">{game.whitePlayerName || game.whiteParticipantId}</td>
                     <td className="py-2 px-2 text-center font-medium">
                       {game.result || '-'}
                     </td>
                     <td className="py-2 px-2 text-right">
-                      {game.blackName || game.blackParticipantId || 'BYE'}
+                      {game.blackPlayerName || game.blackParticipantId || 'BYE'}
                     </td>
                   </tr>
                 ))}

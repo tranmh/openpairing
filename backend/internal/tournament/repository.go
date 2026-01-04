@@ -914,8 +914,20 @@ func (r *PostgresRepository) ListGamesByRound(ctx context.Context, roundID uuid.
 			g.result, g.white_score, g.black_score,
 			g.online_game_id, g.status,
 			g.result_entered_by, g.result_entered_at, g.pgn,
-			g.created_at
+			g.created_at,
+			CASE WHEN wp.id IS NOT NULL THEN
+				COALESCE(wpplayer.last_name, '') || CASE WHEN wpplayer.first_name IS NOT NULL THEN ', ' || wpplayer.first_name ELSE '' END
+			END as white_player_name,
+			CASE WHEN bp.id IS NOT NULL THEN
+				COALESCE(bpplayer.last_name, '') || CASE WHEN bpplayer.first_name IS NOT NULL THEN ', ' || bpplayer.first_name ELSE '' END
+			END as black_player_name,
+			wp.starting_rating as white_rating,
+			bp.starting_rating as black_rating
 		FROM games g
+		LEFT JOIN tournament_participants wp ON g.white_participant_id = wp.id
+		LEFT JOIN tournament_participants bp ON g.black_participant_id = bp.id
+		LEFT JOIN players wpplayer ON wp.player_id = wpplayer.id
+		LEFT JOIN players bpplayer ON bp.player_id = bpplayer.id
 		WHERE g.round_id = $1
 		ORDER BY g.board_number`
 
@@ -935,6 +947,8 @@ func (r *PostgresRepository) ListGamesByRound(ctx context.Context, roundID uuid.
 			&g.OnlineGameID, &g.Status,
 			&g.ResultEnteredBy, &g.ResultEnteredAt, &g.PGN,
 			&g.CreatedAt,
+			&g.WhitePlayerName, &g.BlackPlayerName,
+			&g.WhiteRating, &g.BlackRating,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan game: %w", err)
