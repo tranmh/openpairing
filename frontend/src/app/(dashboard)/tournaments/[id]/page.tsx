@@ -109,27 +109,27 @@ export default function TournamentDetailPage() {
   const queryClient = useQueryClient();
   const tournamentId = params.id as string;
 
-  const { data: tournamentData, isLoading: tournamentLoading } = useQuery({
+  const { data: tournamentData, isLoading: tournamentLoading } = useQuery<{ tournament: Tournament }>({
     queryKey: ['tournament', tournamentId],
-    queryFn: async () => {
+    queryFn: async (): Promise<{ tournament: Tournament }> => {
       const response = await api.get(`/tournaments/${tournamentId}`);
-      return response.data;
+      return response.data as { tournament: Tournament };
     },
   });
 
-  const { data: participantsData } = useQuery({
+  const { data: participantsData } = useQuery<{ participants: Participant[] }>({
     queryKey: ['participants', tournamentId],
-    queryFn: async () => {
+    queryFn: async (): Promise<{ participants: Participant[] }> => {
       const response = await api.get(`/tournaments/${tournamentId}/participants`);
-      return response.data;
+      return response.data as { participants: Participant[] };
     },
   });
 
-  const { data: roundsData } = useQuery({
+  const { data: roundsData } = useQuery<{ rounds: Round[] }>({
     queryKey: ['rounds', tournamentId],
-    queryFn: async () => {
+    queryFn: async (): Promise<{ rounds: Round[] }> => {
       const response = await api.get(`/tournaments/${tournamentId}/rounds`);
-      return response.data;
+      return response.data as { rounds: Round[] };
     },
   });
 

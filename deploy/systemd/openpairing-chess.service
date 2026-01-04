@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenPairing Chess WebSocket Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/openpairing
+EnvironmentFile=/opt/openpairing/.env
+ExecStart=/opt/openpairing/bin/chess
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

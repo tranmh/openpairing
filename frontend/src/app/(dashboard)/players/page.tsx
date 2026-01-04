@@ -9,7 +9,7 @@ import {
   RatingRangeFilter,
 } from '@/components/player/PlayerSearch';
 import { useQuery } from '@tanstack/react-query';
-import { apiClient, Player } from '@/lib/api';
+import { api, Player } from '@/lib/api';
 
 interface PlayerListResponse {
   players: Player[];

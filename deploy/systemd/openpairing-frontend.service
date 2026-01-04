@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenPairing Frontend
+After=network.target openpairing-api.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/openpairing/frontend
+EnvironmentFile=/opt/openpairing/.env
+Environment=NODE_ENV=production
+# Use FRONTEND_PORT for Next.js
+ExecStart=/bin/bash -c 'PORT=$FRONTEND_PORT /usr/bin/npm run start'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

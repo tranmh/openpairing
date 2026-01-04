@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenPairing Background Worker
+After=network.target openpairing-api.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/openpairing
+EnvironmentFile=/opt/openpairing/.env
+ExecStart=/opt/openpairing/bin/worker
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

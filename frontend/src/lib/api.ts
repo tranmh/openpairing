@@ -145,6 +145,7 @@ export interface Player {
   fideTitle?: string;
   nationalTitle?: string;
   clubId?: string;
+  clubName?: string;
   federation?: string;
 }
 

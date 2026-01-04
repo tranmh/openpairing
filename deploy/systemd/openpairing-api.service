@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenPairing API Server
+After=network.target postgresql.service redis.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/openpairing
+EnvironmentFile=/opt/openpairing/.env
+ExecStart=/opt/openpairing/bin/api
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

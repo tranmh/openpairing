@@ -109,16 +109,14 @@ export default function ArbiterConsolePage() {
   const tournamentId = params.tournamentId as string;
   const queryClient = useQueryClient();
 
-  const { data, isLoading, error, refetch } = useQuery({
+  const { data: status, isLoading, error, refetch } = useQuery<TournamentStatus>({
     queryKey: ['arbiter-status', tournamentId],
-    queryFn: async () => {
+    queryFn: async (): Promise<TournamentStatus> => {
       const response = await api.get(`/arbiter/tournaments/${tournamentId}/status`);
-      return response.data;
+      return response.data as TournamentStatus;
     },
     refetchInterval: 30000, // Refresh every 30 seconds
   });
-
-  const status: TournamentStatus | undefined = data?.status;
 
   if (isLoading) {
     return (
