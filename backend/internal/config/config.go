@@ -14,6 +14,7 @@ type Config struct {
 	Redis       RedisConfig
 	JWT         JWTConfig
 	CORS        CORSConfig
+	Federation  FederationConfig
 }
 
 type ServerConfig struct {
@@ -58,6 +59,21 @@ type CORSConfig struct {
 	AllowCredentials bool
 }
 
+type FederationConfig struct {
+	CacheDir         string
+	EnableFIDESync   bool
+	EnableDSBSync    bool
+	EnableOESBSync   bool
+	EnableSSBSync    bool
+	FideSyncInterval time.Duration
+	DSBSyncInterval  time.Duration
+	OESBSyncInterval time.Duration
+	SSBSyncInterval  time.Duration
+	DSBAPIKey        string
+	OESBAPIKey       string
+	SSBAPIKey        string
+}
+
 // Load loads configuration from environment variables
 func Load() *Config {
 	return &Config{
@@ -99,6 +115,20 @@ func Load() *Config {
 			AllowedHeaders:   []string{"Origin", "Content-Type", "Accept", "Authorization"},
 			AllowCredentials: true,
 		},
+		Federation: FederationConfig{
+			CacheDir:         getEnv("FEDERATION_CACHE_DIR", "/tmp/openpairing_federation"),
+			EnableFIDESync:   getBoolEnv("FEDERATION_ENABLE_FIDE", false),
+			EnableDSBSync:    getBoolEnv("FEDERATION_ENABLE_DSB", false),
+			EnableOESBSync:   getBoolEnv("FEDERATION_ENABLE_OESB", false),
+			EnableSSBSync:    getBoolEnv("FEDERATION_ENABLE_SSB", false),
+			FideSyncInterval: getDurationEnv("FEDERATION_FIDE_INTERVAL", 24*time.Hour),
+			DSBSyncInterval:  getDurationEnv("FEDERATION_DSB_INTERVAL", 7*24*time.Hour),
+			OESBSyncInterval: getDurationEnv("FEDERATION_OESB_INTERVAL", 7*24*time.Hour),
+			SSBSyncInterval:  getDurationEnv("FEDERATION_SSB_INTERVAL", 7*24*time.Hour),
+			DSBAPIKey:        getEnv("FEDERATION_DSB_API_KEY", ""),
+			OESBAPIKey:       getEnv("FEDERATION_OESB_API_KEY", ""),
+			SSBAPIKey:        getEnv("FEDERATION_SSB_API_KEY", ""),
+		},
 	}
 }
 
@@ -128,6 +158,15 @@ func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
 	if value := os.Getenv(key); value != "" {
 		if d, err := time.ParseDuration(value); err == nil {
 			return d
+		}
+	}
+	return defaultValue
+}
+
+func getBoolEnv(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if b, err := strconv.ParseBool(value); err == nil {
+			return b
 		}
 	}
 	return defaultValue

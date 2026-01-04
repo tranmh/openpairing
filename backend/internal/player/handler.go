@@ -78,13 +78,13 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 func (h *Handler) SearchPlayers(c *gin.Context) {
 	var req SearchPlayersRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
-		response.BadRequest(c, "Invalid query parameters", err.Error())
+		response.BadRequest(c, "Invalid query parameters: "+err.Error())
 		return
 	}
 
 	result, err := h.service.SearchPlayers(c.Request.Context(), &req)
 	if err != nil {
-		response.InternalError(c, "Failed to search players")
+		response.InternalServerError(c, "Failed to search players")
 		return
 	}
 
@@ -106,7 +106,7 @@ func (h *Handler) GetPlayer(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		response.BadRequest(c, "Invalid player ID", "must be a valid UUID")
+		response.BadRequest(c, "Invalid player ID: must be a valid UUID")
 		return
 	}
 
@@ -116,7 +116,7 @@ func (h *Handler) GetPlayer(c *gin.Context) {
 			response.NotFound(c, "Player not found")
 			return
 		}
-		response.InternalError(c, "Failed to get player")
+		response.InternalServerError(c, "Failed to get player")
 		return
 	}
 
@@ -140,7 +140,7 @@ func (h *Handler) GetPlayer(c *gin.Context) {
 func (h *Handler) CreatePlayer(c *gin.Context) {
 	var req CreatePlayerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request body", err.Error())
+		response.BadRequest(c, "Invalid request body: "+err.Error())
 		return
 	}
 
@@ -154,7 +154,7 @@ func (h *Handler) CreatePlayer(c *gin.Context) {
 		case errors.Is(err, ErrDuplicateOesbID):
 			response.Conflict(c, "Player with this ÖSB ID already exists")
 		default:
-			response.InternalError(c, "Failed to create player")
+			response.InternalServerError(c, "Failed to create player")
 		}
 		return
 	}
@@ -182,13 +182,13 @@ func (h *Handler) UpdatePlayer(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		response.BadRequest(c, "Invalid player ID", "must be a valid UUID")
+		response.BadRequest(c, "Invalid player ID: must be a valid UUID")
 		return
 	}
 
 	var req UpdatePlayerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request body", err.Error())
+		response.BadRequest(c, "Invalid request body: "+err.Error())
 		return
 	}
 
@@ -204,7 +204,7 @@ func (h *Handler) UpdatePlayer(c *gin.Context) {
 		case errors.Is(err, ErrDuplicateOesbID):
 			response.Conflict(c, "Player with this ÖSB ID already exists")
 		default:
-			response.InternalError(c, "Failed to update player")
+			response.InternalServerError(c, "Failed to update player")
 		}
 		return
 	}
@@ -230,7 +230,7 @@ func (h *Handler) DeletePlayer(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		response.BadRequest(c, "Invalid player ID", "must be a valid UUID")
+		response.BadRequest(c, "Invalid player ID: must be a valid UUID")
 		return
 	}
 
@@ -239,7 +239,7 @@ func (h *Handler) DeletePlayer(c *gin.Context) {
 			response.NotFound(c, "Player not found")
 			return
 		}
-		response.InternalError(c, "Failed to delete player")
+		response.InternalServerError(c, "Failed to delete player")
 		return
 	}
 
@@ -263,7 +263,7 @@ func (h *Handler) GetRatingHistory(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		response.BadRequest(c, "Invalid player ID", "must be a valid UUID")
+		response.BadRequest(c, "Invalid player ID: must be a valid UUID")
 		return
 	}
 
@@ -277,7 +277,7 @@ func (h *Handler) GetRatingHistory(c *gin.Context) {
 
 	history, err := h.service.GetRatingHistory(c.Request.Context(), id, ratingType, limit)
 	if err != nil {
-		response.InternalError(c, "Failed to get rating history")
+		response.InternalServerError(c, "Failed to get rating history")
 		return
 	}
 
@@ -309,7 +309,7 @@ func (h *Handler) ListClubs(c *gin.Context) {
 
 	clubs, total, err := h.service.ListClubs(c.Request.Context(), page, limit)
 	if err != nil {
-		response.InternalError(c, "Failed to list clubs")
+		response.InternalServerError(c, "Failed to list clubs")
 		return
 	}
 
@@ -336,7 +336,7 @@ func (h *Handler) GetClub(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		response.BadRequest(c, "Invalid club ID", "must be a valid UUID")
+		response.BadRequest(c, "Invalid club ID: must be a valid UUID")
 		return
 	}
 
@@ -346,7 +346,7 @@ func (h *Handler) GetClub(c *gin.Context) {
 			response.NotFound(c, "Club not found")
 			return
 		}
-		response.InternalError(c, "Failed to get club")
+		response.InternalServerError(c, "Failed to get club")
 		return
 	}
 
@@ -369,12 +369,12 @@ func (h *Handler) GetClub(c *gin.Context) {
 func (h *Handler) CreateClub(c *gin.Context) {
 	var club Club
 	if err := c.ShouldBindJSON(&club); err != nil {
-		response.BadRequest(c, "Invalid request body", err.Error())
+		response.BadRequest(c, "Invalid request body: "+err.Error())
 		return
 	}
 
 	if err := h.service.CreateClub(c.Request.Context(), &club); err != nil {
-		response.InternalError(c, "Failed to create club")
+		response.InternalServerError(c, "Failed to create club")
 		return
 	}
 

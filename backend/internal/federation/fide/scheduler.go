@@ -32,8 +32,22 @@ type SchedulerConfig struct {
 	Interval   time.Duration // Default: 24 hours
 }
 
-// NewScheduler creates a new FIDE sync scheduler
-func NewScheduler(repo player.Repository, cfg *SchedulerConfig, logger zerolog.Logger) *Scheduler {
+// NewScheduler creates a new FIDE sync scheduler from importer
+func NewScheduler(importer *Importer, interval time.Duration, logger zerolog.Logger) *Scheduler {
+	if interval <= 0 {
+		interval = 24 * time.Hour // Daily sync by default
+	}
+
+	return &Scheduler{
+		importer: importer,
+		logger:   logger.With().Str("component", "fide_scheduler").Logger(),
+		interval: interval,
+		stopCh:   make(chan struct{}),
+	}
+}
+
+// NewSchedulerWithConfig creates a new FIDE sync scheduler with full config
+func NewSchedulerWithConfig(repo player.Repository, cfg *SchedulerConfig, logger zerolog.Logger) *Scheduler {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 24 * time.Hour // Daily sync by default
 	}
@@ -55,7 +69,7 @@ func NewScheduler(repo player.Repository, cfg *SchedulerConfig, logger zerolog.L
 }
 
 // Start begins the periodic sync schedule
-func (s *Scheduler) Start() {
+func (s *Scheduler) Start(ctx context.Context) {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
@@ -65,7 +79,7 @@ func (s *Scheduler) Start() {
 	s.mu.Unlock()
 
 	s.wg.Add(1)
-	go s.run()
+	go s.runWithContext(ctx)
 
 	s.logger.Info().
 		Dur("interval", s.interval).
@@ -88,8 +102,8 @@ func (s *Scheduler) Stop() {
 	s.logger.Info().Msg("FIDE scheduler stopped")
 }
 
-// run is the main scheduler loop
-func (s *Scheduler) run() {
+// runWithContext is the main scheduler loop with context
+func (s *Scheduler) runWithContext(ctx context.Context) {
 	defer s.wg.Done()
 
 	// Run immediately on start
@@ -100,6 +114,8 @@ func (s *Scheduler) run() {
 
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-s.stopCh:
 			return
 		case <-ticker.C:
@@ -198,4 +214,11 @@ func (s *Scheduler) IsHealthy() bool {
 	}
 
 	return true
+}
+
+// GetLastSyncStatus returns the last sync time and result
+func (s *Scheduler) GetLastSyncStatus() (time.Time, *ImportResult) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastSync, s.lastResult
 }

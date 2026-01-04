@@ -12,6 +12,11 @@ import (
 	"github.com/openpairing/openpairing/internal/auth"
 	"github.com/openpairing/openpairing/internal/config"
 	"github.com/openpairing/openpairing/internal/database"
+	"github.com/openpairing/openpairing/internal/federation"
+	"github.com/openpairing/openpairing/internal/federation/dsb"
+	"github.com/openpairing/openpairing/internal/federation/fide"
+	"github.com/openpairing/openpairing/internal/federation/oesb"
+	"github.com/openpairing/openpairing/internal/federation/ssb"
 	"github.com/openpairing/openpairing/internal/middleware"
 	"github.com/openpairing/openpairing/internal/player"
 	"github.com/rs/zerolog"
@@ -45,8 +50,47 @@ func main() {
 	playerService := player.NewService(playerRepo, log.Logger)
 	playerHandler := player.NewHandler(playerService)
 
+	// Federation services
+	fideImporter := fide.NewImporter(playerRepo, &fide.ImporterConfig{
+		CacheDir:   cfg.Federation.CacheDir,
+		BatchSize:  500,
+		Workers:    4,
+		FilterDACH: true,
+		MinRating:  0,
+	}, log.Logger)
+	fideScheduler := fide.NewScheduler(fideImporter, cfg.Federation.FideSyncInterval, log.Logger)
+
+	dsbImporter := dsb.NewImporter(playerRepo, &dsb.ImporterConfig{
+		BatchSize: 100,
+	}, log.Logger)
+	dsbScheduler := dsb.NewScheduler(dsbImporter, cfg.Federation.DSBSyncInterval, log.Logger)
+
+	oesbImporter := oesb.NewImporter(playerRepo, &oesb.ImporterConfig{
+		BatchSize: 100,
+		Workers:   4,
+	}, log.Logger)
+	oesbScheduler := oesb.NewScheduler(oesbImporter, cfg.Federation.OESBSyncInterval, log.Logger)
+
+	ssbImporter := ssb.NewImporter(playerRepo, &ssb.ImporterConfig{
+		BatchSize: 100,
+		Workers:   4,
+	}, log.Logger)
+	ssbScheduler := ssb.NewScheduler(ssbImporter, cfg.Federation.SSBSyncInterval, log.Logger)
+
+	federationHandler := federation.NewHandler(&federation.HandlerConfig{
+		FideImporter:  fideImporter,
+		FideScheduler: fideScheduler,
+		DSBImporter:   dsbImporter,
+		DSBScheduler:  dsbScheduler,
+		OESBImporter:  oesbImporter,
+		OESBScheduler: oesbScheduler,
+		SSBImporter:   ssbImporter,
+		SSBScheduler:  ssbScheduler,
+		PlayerRepo:    playerRepo,
+	}, log.Logger)
+
 	// Create Gin router
-	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler)
+	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler)
 
 	// Create server
 	srv := &http.Server{
@@ -55,6 +99,21 @@ func main() {
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,
+	}
+
+	// Start federation schedulers if enabled
+	ctx, cancelSchedulers := context.WithCancel(context.Background())
+	if cfg.Federation.EnableFIDESync {
+		go fideScheduler.Start(ctx)
+	}
+	if cfg.Federation.EnableDSBSync {
+		go dsbScheduler.Start(ctx)
+	}
+	if cfg.Federation.EnableOESBSync {
+		go oesbScheduler.Start(ctx)
+	}
+	if cfg.Federation.EnableSSBSync {
+		go ssbScheduler.Start(ctx)
 	}
 
 	// Start server in goroutine
@@ -71,18 +130,21 @@ func main() {
 	<-quit
 	log.Info().Msg("Shutting down server...")
 
+	// Cancel federation schedulers
+	cancelSchedulers()
+
 	// Graceful shutdown with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Fatal().Err(err).Msg("Server forced to shutdown")
 	}
 
 	log.Info().Msg("Server exited")
 }
 
-func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler) *gin.Engine {
+func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler) *gin.Engine {
 	// Set Gin mode
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -123,14 +185,8 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 		// Player routes
 		playerHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireAdmin())
 
-		// Federation import routes (admin only)
-		fedImport := v1.Group("/players")
-		fedImport.Use(middleware.APIRateLimit(), authMiddleware.Authenticate(), authMiddleware.RequireAdmin())
-		{
-			fedImport.POST("/import/fide", notImplemented)
-			fedImport.POST("/import/dsb", notImplemented)
-			fedImport.POST("/search-federation", notImplemented)
-		}
+		// Federation routes
+		federationHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireAdmin())
 
 		// Tournament routes
 		tournaments := v1.Group("/tournaments")

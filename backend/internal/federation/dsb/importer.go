@@ -50,6 +50,7 @@ func NewImporter(repo player.Repository, cfg *ImporterConfig, logger zerolog.Log
 // ImportResult contains statistics from the import
 type ImportResult struct {
 	ImportTime     time.Duration
+	Duration       time.Duration
 	TotalPlayers   int
 	NewPlayers     int
 	UpdatedPlayers int
@@ -77,6 +78,11 @@ func (i *Importer) ImportPlayer(ctx context.Context, pkz string) (*player.Player
 
 	// Fetch the updated player
 	return i.playerRepo.GetByDsbID(ctx, pkz)
+}
+
+// ImportClubMembers imports all players from a club (alias for ImportClub)
+func (i *Importer) ImportClubMembers(ctx context.Context, zps string) (*ImportResult, error) {
+	return i.ImportClub(ctx, zps)
 }
 
 // ImportClub imports all players from a club
@@ -203,43 +209,50 @@ func (i *Importer) SyncPlayer(ctx context.Context, pkz string) error {
 	return err
 }
 
-// SearchAndImport searches for a player and imports if found
-func (i *Importer) SearchAndImport(ctx context.Context, query string) ([]*player.Player, error) {
-	dsbPlayers, err := i.client.SearchPlayers(ctx, query, 20)
+// SearchAndImport searches for players and imports them
+func (i *Importer) SearchAndImport(ctx context.Context, query string, limit int) (*ImportResult, error) {
+	startTime := time.Now()
+	result := &ImportResult{}
+
+	if limit <= 0 {
+		limit = 20
+	}
+
+	dsbPlayers, err := i.client.SearchPlayers(ctx, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search DSB: %w", err)
 	}
 
-	var players []*player.Player
+	result.TotalPlayers = len(dsbPlayers)
+
 	for _, dp := range dsbPlayers {
 		p := i.convertToPlayer(dp)
 		if err := i.playerRepo.UpsertByDsbID(ctx, p); err != nil {
 			i.logger.Warn().Err(err).Str("pkz", dp.PKZ).Msg("Failed to upsert player")
+			result.Errors++
 			continue
 		}
-
-		// Fetch the saved player
-		saved, err := i.playerRepo.GetByDsbID(ctx, dp.PKZ)
-		if err != nil {
-			continue
-		}
-		players = append(players, saved)
+		result.UpdatedPlayers++
 	}
 
-	return players, nil
+	result.Duration = time.Since(startTime)
+	result.ImportTime = result.Duration
+
+	return result, nil
 }
 
 // Scheduler manages periodic DSB sync jobs
 type Scheduler struct {
-	importer  *Importer
-	logger    zerolog.Logger
-	interval  time.Duration
-	clubZPS   []string // List of clubs to sync
-	stopCh    chan struct{}
-	wg        sync.WaitGroup
-	mu        sync.RWMutex
-	running   bool
-	lastSync  time.Time
+	importer   *Importer
+	logger     zerolog.Logger
+	interval   time.Duration
+	clubZPS    []string // List of clubs to sync
+	stopCh     chan struct{}
+	wg         sync.WaitGroup
+	mu         sync.RWMutex
+	running    bool
+	lastSync   time.Time
+	lastResult *ImportResult
 }
 
 // SchedulerConfig contains scheduler configuration
@@ -251,8 +264,23 @@ type SchedulerConfig struct {
 	ClubZPS   []string // List of clubs to sync
 }
 
-// NewScheduler creates a new DSB sync scheduler
-func NewScheduler(repo player.Repository, cfg *SchedulerConfig, logger zerolog.Logger) *Scheduler {
+// NewScheduler creates a new DSB sync scheduler from importer
+func NewScheduler(importer *Importer, interval time.Duration, logger zerolog.Logger) *Scheduler {
+	if interval <= 0 {
+		interval = 7 * 24 * time.Hour // Weekly sync by default
+	}
+
+	return &Scheduler{
+		importer: importer,
+		logger:   logger.With().Str("component", "dsb_scheduler").Logger(),
+		interval: interval,
+		clubZPS:  []string{},
+		stopCh:   make(chan struct{}),
+	}
+}
+
+// NewSchedulerWithConfig creates a new DSB sync scheduler with full config
+func NewSchedulerWithConfig(repo player.Repository, cfg *SchedulerConfig, logger zerolog.Logger) *Scheduler {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 7 * 24 * time.Hour // Weekly sync by default
 	}
@@ -273,7 +301,7 @@ func NewScheduler(repo player.Repository, cfg *SchedulerConfig, logger zerolog.L
 }
 
 // Start begins the periodic sync schedule
-func (s *Scheduler) Start() {
+func (s *Scheduler) Start(ctx context.Context) {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
@@ -283,7 +311,7 @@ func (s *Scheduler) Start() {
 	s.mu.Unlock()
 
 	s.wg.Add(1)
-	go s.run()
+	go s.runWithContext(ctx)
 
 	s.logger.Info().
 		Dur("interval", s.interval).
@@ -307,8 +335,8 @@ func (s *Scheduler) Stop() {
 	s.logger.Info().Msg("DSB scheduler stopped")
 }
 
-// run is the main scheduler loop
-func (s *Scheduler) run() {
+// runWithContext is the main scheduler loop with context
+func (s *Scheduler) runWithContext(ctx context.Context) {
 	defer s.wg.Done()
 
 	// Run immediately on start
@@ -319,6 +347,8 @@ func (s *Scheduler) run() {
 
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-s.stopCh:
 			return
 		case <-ticker.C:
@@ -360,16 +390,36 @@ func (s *Scheduler) runSync() {
 }
 
 // TriggerSync triggers an immediate sync
-func (s *Scheduler) TriggerSync(ctx context.Context) error {
+func (s *Scheduler) TriggerSync(ctx context.Context) (*ImportResult, error) {
 	s.logger.Info().Msg("Manual DSB sync triggered")
 
+	result := &ImportResult{}
+	startTime := time.Now()
+
 	for _, zps := range s.clubZPS {
-		if _, err := s.importer.ImportClub(ctx, zps); err != nil {
-			return err
+		clubResult, err := s.importer.ImportClub(ctx, zps)
+		if err != nil {
+			return nil, err
 		}
+		result.UpdatedPlayers += clubResult.UpdatedPlayers
+		result.TotalPlayers += clubResult.TotalPlayers
+		result.Errors += clubResult.Errors
 	}
 
-	return nil
+	result.Duration = time.Since(startTime)
+	s.mu.Lock()
+	s.lastSync = time.Now()
+	s.lastResult = result
+	s.mu.Unlock()
+
+	return result, nil
+}
+
+// GetStatus returns the scheduler status
+func (s *Scheduler) GetStatus() (time.Time, *ImportResult) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastSync, s.lastResult
 }
 
 // AddClub adds a club to the sync list

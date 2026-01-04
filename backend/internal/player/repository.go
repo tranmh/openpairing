@@ -44,7 +44,11 @@ type Repository interface {
 	// Bulk operations for federation sync
 	UpsertByFideID(ctx context.Context, player *Player) error
 	UpsertByDsbID(ctx context.Context, player *Player) error
+	UpsertByOesbID(ctx context.Context, player *Player) error
+	UpsertBySsbID(ctx context.Context, player *Player) error
 	BulkUpsertByFideID(ctx context.Context, players []*Player) error
+	BulkUpsertByOesbID(ctx context.Context, players []*Player) error
+	BulkUpsertBySsbID(ctx context.Context, players []*Player) error
 }
 
 type PostgresRepository struct {
@@ -726,6 +730,165 @@ func (r *PostgresRepository) BulkUpsertByFideID(ctx context.Context, players []*
 			player.ID, player.FirstName, player.LastName, player.FideID,
 			player.FideStandard, player.FideRapid, player.FideBlitz,
 			player.FideTitle, player.Federation, player.RatingsUpdatedAt,
+			player.CreatedAt, player.UpdatedAt,
+		)
+	}
+
+	results := r.db.SendBatch(ctx, batch)
+	defer results.Close()
+
+	for range players {
+		_, err := results.Exec()
+		if err != nil {
+			return fmt.Errorf("failed to execute batch upsert: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (r *PostgresRepository) UpsertByOesbID(ctx context.Context, player *Player) error {
+	now := time.Now()
+	player.UpdatedAt = now
+	if player.ID == uuid.Nil {
+		player.ID = uuid.New()
+		player.CreatedAt = now
+	}
+
+	query := `
+		INSERT INTO players (
+			id, first_name, last_name, oesb_id, oesb_elo,
+			federation, ratings_updated_at, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (oesb_id) DO UPDATE SET
+			first_name = EXCLUDED.first_name,
+			last_name = EXCLUDED.last_name,
+			oesb_elo = EXCLUDED.oesb_elo,
+			federation = EXCLUDED.federation,
+			ratings_updated_at = EXCLUDED.ratings_updated_at,
+			updated_at = EXCLUDED.updated_at`
+
+	_, err := r.db.Exec(ctx, query,
+		player.ID, player.FirstName, player.LastName, player.OesbID,
+		player.OesbElo, player.Federation,
+		player.RatingsUpdatedAt, player.CreatedAt, player.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to upsert player by OESB ID: %w", err)
+	}
+
+	return nil
+}
+
+func (r *PostgresRepository) UpsertBySsbID(ctx context.Context, player *Player) error {
+	now := time.Now()
+	player.UpdatedAt = now
+	if player.ID == uuid.Nil {
+		player.ID = uuid.New()
+		player.CreatedAt = now
+	}
+
+	query := `
+		INSERT INTO players (
+			id, first_name, last_name, ssb_id,
+			federation, ratings_updated_at, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (ssb_id) DO UPDATE SET
+			first_name = EXCLUDED.first_name,
+			last_name = EXCLUDED.last_name,
+			federation = EXCLUDED.federation,
+			ratings_updated_at = EXCLUDED.ratings_updated_at,
+			updated_at = EXCLUDED.updated_at`
+
+	_, err := r.db.Exec(ctx, query,
+		player.ID, player.FirstName, player.LastName, player.SsbID,
+		player.Federation, player.RatingsUpdatedAt, player.CreatedAt, player.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to upsert player by SSB ID: %w", err)
+	}
+
+	return nil
+}
+
+func (r *PostgresRepository) BulkUpsertByOesbID(ctx context.Context, players []*Player) error {
+	if len(players) == 0 {
+		return nil
+	}
+
+	batch := &pgx.Batch{}
+	now := time.Now()
+
+	for _, player := range players {
+		player.UpdatedAt = now
+		if player.ID == uuid.Nil {
+			player.ID = uuid.New()
+			player.CreatedAt = now
+		}
+
+		query := `
+			INSERT INTO players (
+				id, first_name, last_name, oesb_id, oesb_elo,
+				federation, ratings_updated_at, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			ON CONFLICT (oesb_id) DO UPDATE SET
+				first_name = EXCLUDED.first_name,
+				last_name = EXCLUDED.last_name,
+				oesb_elo = EXCLUDED.oesb_elo,
+				federation = EXCLUDED.federation,
+				ratings_updated_at = EXCLUDED.ratings_updated_at,
+				updated_at = EXCLUDED.updated_at`
+
+		batch.Queue(query,
+			player.ID, player.FirstName, player.LastName, player.OesbID,
+			player.OesbElo, player.Federation, player.RatingsUpdatedAt,
+			player.CreatedAt, player.UpdatedAt,
+		)
+	}
+
+	results := r.db.SendBatch(ctx, batch)
+	defer results.Close()
+
+	for range players {
+		_, err := results.Exec()
+		if err != nil {
+			return fmt.Errorf("failed to execute batch upsert: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (r *PostgresRepository) BulkUpsertBySsbID(ctx context.Context, players []*Player) error {
+	if len(players) == 0 {
+		return nil
+	}
+
+	batch := &pgx.Batch{}
+	now := time.Now()
+
+	for _, player := range players {
+		player.UpdatedAt = now
+		if player.ID == uuid.Nil {
+			player.ID = uuid.New()
+			player.CreatedAt = now
+		}
+
+		query := `
+			INSERT INTO players (
+				id, first_name, last_name, ssb_id,
+				federation, ratings_updated_at, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (ssb_id) DO UPDATE SET
+				first_name = EXCLUDED.first_name,
+				last_name = EXCLUDED.last_name,
+				federation = EXCLUDED.federation,
+				ratings_updated_at = EXCLUDED.ratings_updated_at,
+				updated_at = EXCLUDED.updated_at`
+
+		batch.Queue(query,
+			player.ID, player.FirstName, player.LastName, player.SsbID,
+			player.Federation, player.RatingsUpdatedAt,
 			player.CreatedAt, player.UpdatedAt,
 		)
 	}
