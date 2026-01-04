@@ -25,12 +25,6 @@ const nextConfig = {
     ],
   },
 
-  // Internationalization
-  i18n: {
-    locales: ['de', 'en'],
-    defaultLocale: 'de',
-  },
-
   // Environment variables exposed to browser
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
@@ -42,7 +36,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.API_URL || 'http://localhost:8080'}/api/:path*`,
+        destination: `${process.env.API_URL || 'http://localhost:9080'}/api/:path*`,
       },
       {
         source: '/ws/:path*',
