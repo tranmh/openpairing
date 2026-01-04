@@ -23,6 +23,7 @@ import (
 	"github.com/openpairing/openpairing/internal/notification"
 	"github.com/openpairing/openpairing/internal/pairing/engine"
 	"github.com/openpairing/openpairing/internal/player"
+	"github.com/openpairing/openpairing/internal/reports"
 	"github.com/openpairing/openpairing/internal/tournament"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -141,8 +142,15 @@ func main() {
 	arbiterService := arbiter.NewService(tournamentRepo, nil, log.Logger)
 	arbiterHandler := arbiter.NewHandler(arbiterService, log.Logger)
 
+	// Reports service
+	reportsDataProvider := reports.NewPostgresDataProvider(db.Pool)
+	dwzReportService := reports.NewDWZReportService(reportsDataProvider)
+	trfReportService := reports.NewTRFReportService(reportsDataProvider)
+	normReportService := reports.NewNormReportService(reportsDataProvider)
+	reportsHandler := reports.NewHandler(dwzReportService, normReportService, trfReportService, log.Logger)
+
 	// Create Gin router
-	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler)
+	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler)
 
 	// Create server
 	srv := &http.Server{
@@ -196,7 +204,7 @@ func main() {
 	log.Info().Msg("Server exited")
 }
 
-func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler) *gin.Engine {
+func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler, reportsHandler *reports.Handler) *gin.Engine {
 	// Set Gin mode
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -251,6 +259,9 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 
 		// Arbiter routes
 		arbiterHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireArbiter())
+
+		// Reports routes
+		reportsHandler.RegisterRoutes(v1)
 
 		// Organization routes
 		orgs := v1.Group("/organizations")
