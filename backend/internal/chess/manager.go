@@ -1,7 +1,6 @@
 package chess
 
 import (
-	"context"
 	"sync"
 	"time"
 

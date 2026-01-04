@@ -94,7 +94,10 @@ func NewGame(whiteUserID, blackUserID uuid.UUID, initialTimeMs, incrementMs int6
 
 // LoadGame loads a game from a FEN position and moves
 func LoadGame(id uuid.UUID, fen string, moves []string) (*GameState, error) {
-	fenOpt := chess.FEN(fen)
+	fenOpt, err := chess.FEN(fen)
+	if err != nil {
+		return nil, fmt.Errorf("invalid FEN: %w", err)
+	}
 	g := chess.NewGame(fenOpt)
 
 	// Replay moves
@@ -188,13 +191,26 @@ func (gs *GameState) MakeMove(userID uuid.UUID, moveUCI string) error {
 	return nil
 }
 
+// squareFromString parses a square string like "e2" to a chess.Square
+func squareFromString(s string) chess.Square {
+	if len(s) != 2 {
+		return chess.NoSquare
+	}
+	file := chess.File(s[0] - 'a')
+	rank := chess.Rank(s[1] - '1')
+	if file < chess.FileA || file > chess.FileH || rank < chess.Rank1 || rank > chess.Rank8 {
+		return chess.NoSquare
+	}
+	return chess.NewSquare(file, rank)
+}
+
 func parseUCIMove(g *chess.Game, uci string) (*chess.Move, error) {
 	if len(uci) < 4 || len(uci) > 5 {
 		return nil, fmt.Errorf("invalid UCI format")
 	}
 
-	from := chess.SquareFromString(uci[0:2])
-	to := chess.SquareFromString(uci[2:4])
+	from := squareFromString(uci[0:2])
+	to := squareFromString(uci[2:4])
 
 	var promo chess.PieceType = chess.NoPieceType
 	if len(uci) == 5 {
@@ -436,9 +452,26 @@ func (gs *GameState) GetState() GameStateSnapshot {
 		Result:        gs.Result,
 		Termination:   gs.Termination,
 		Turn:          gs.getTurn(),
-		InCheck:       gs.game.Position().InCheck(),
+		InCheck:       gs.isInCheck(),
 		DrawOfferedBy: gs.DrawOfferedBy,
 	}
+}
+
+// isInCheck determines if the current side to move is in check
+// by checking if there are no valid moves that don't result from check evasion
+func (gs *GameState) isInCheck() bool {
+	// If we have moves, check if the last move has the Check tag
+	moves := gs.game.Moves()
+	if len(moves) > 0 {
+		lastMove := moves[len(moves)-1]
+		// Check if the last move was a check
+		for _, tag := range []chess.MoveTag{chess.Check} {
+			if lastMove.HasTag(tag) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (gs *GameState) getTurn() string {
