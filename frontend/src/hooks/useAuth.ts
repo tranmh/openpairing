@@ -12,8 +12,10 @@ export function useAuth() {
 
   return {
     user: store.user,
+    token: store.accessToken,
     isAuthenticated: store.isAuthenticated,
     isLoading: store.isLoading,
+    isHydrated: store.isHydrated,
     error: store.error,
     login: store.login,
     register: store.register,
@@ -28,17 +30,20 @@ export function useAuth() {
 export function useRequireAuth(redirectTo: string = '/login') {
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, isLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, isHydrated } = useAuthStore();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    // Wait for hydration before making auth decisions
+    if (!isHydrated || isLoading) return;
+
+    if (!isAuthenticated) {
       // Store the attempted URL for redirect after login
       const returnUrl = encodeURIComponent(pathname);
       router.push(`${redirectTo}?returnUrl=${returnUrl}`);
     }
-  }, [isAuthenticated, isLoading, router, pathname, redirectTo]);
+  }, [isAuthenticated, isLoading, isHydrated, router, pathname, redirectTo]);
 
-  return { isAuthenticated, isLoading };
+  return { isAuthenticated, isLoading, isHydrated };
 }
 
 /**
@@ -46,15 +51,22 @@ export function useRequireAuth(redirectTo: string = '/login') {
  */
 export function useRedirectIfAuthenticated(redirectTo: string = '/dashboard') {
   const router = useRouter();
-  const { isAuthenticated, isLoading } = useAuthStore();
+  const pathname = usePathname();
+  const { isAuthenticated, isLoading, isHydrated } = useAuthStore();
 
   useEffect(() => {
-    if (!isLoading && isAuthenticated) {
+    // Wait for hydration before making auth decisions
+    if (!isHydrated || isLoading) return;
+
+    // Prevent redirect if already on the target page
+    if (pathname === redirectTo) return;
+
+    if (isAuthenticated) {
       router.push(redirectTo);
     }
-  }, [isAuthenticated, isLoading, router, redirectTo]);
+  }, [isAuthenticated, isLoading, isHydrated, router, redirectTo, pathname]);
 
-  return { isAuthenticated, isLoading };
+  return { isAuthenticated, isLoading, isHydrated };
 }
 
 /**
@@ -62,22 +74,23 @@ export function useRedirectIfAuthenticated(redirectTo: string = '/dashboard') {
  */
 export function useRequireRole(allowedRoles: string[], redirectTo: string = '/dashboard') {
   const router = useRouter();
-  const { user, isAuthenticated, isLoading } = useAuthStore();
+  const { user, isAuthenticated, isLoading, isHydrated } = useAuthStore();
 
   useEffect(() => {
-    if (!isLoading) {
-      if (!isAuthenticated) {
-        router.push('/login');
-        return;
-      }
+    // Wait for hydration before making auth decisions
+    if (!isHydrated || isLoading) return;
 
-      if (user && !allowedRoles.includes(user.role)) {
-        router.push(redirectTo);
-      }
+    if (!isAuthenticated) {
+      router.push('/login');
+      return;
     }
-  }, [user, isAuthenticated, isLoading, router, allowedRoles, redirectTo]);
+
+    if (user && !allowedRoles.includes(user.role)) {
+      router.push(redirectTo);
+    }
+  }, [user, isAuthenticated, isLoading, isHydrated, router, allowedRoles, redirectTo]);
 
   const hasRole = user ? allowedRoles.includes(user.role) : false;
 
-  return { hasRole, isLoading };
+  return { hasRole, isLoading, isHydrated };
 }

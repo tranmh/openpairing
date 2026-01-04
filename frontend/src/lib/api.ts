@@ -67,20 +67,50 @@ class ApiClient {
         return { status };
       }
 
-      const data = await response.json();
+      // Check Content-Type before parsing JSON
+      const contentType = response.headers.get('content-type');
+      let data: unknown;
+
+      if (contentType?.includes('application/json')) {
+        try {
+          data = await response.json();
+        } catch {
+          return {
+            status,
+            error: {
+              message: 'Invalid JSON response from server',
+              code: 'PARSE_ERROR',
+            },
+          };
+        }
+      } else {
+        // Non-JSON response
+        const text = await response.text();
+        if (!response.ok) {
+          return {
+            status,
+            error: {
+              message: text || `HTTP ${status} error`,
+              code: 'NON_JSON_ERROR',
+            },
+          };
+        }
+        return { data: text as T, status };
+      }
 
       if (!response.ok) {
+        const errorData = data as Record<string, unknown>;
         return {
           status,
           error: {
-            message: data.error || data.message || 'An error occurred',
-            code: data.code,
-            details: data.details,
+            message: (errorData.error || errorData.message || 'An error occurred') as string,
+            code: errorData.code as string | undefined,
+            details: errorData.details as Record<string, string[]> | undefined,
           },
         };
       }
 
-      return { data, status };
+      return { data: data as T, status };
     } catch (error) {
       return {
         status: 0,

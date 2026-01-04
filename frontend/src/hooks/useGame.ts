@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { useAuth } from './useAuth';
+import { useAuthStore } from '@/store/auth';
 
 export interface GameState {
   id: string;
@@ -39,17 +39,25 @@ interface UseGameOptions {
 
 export function useGame(options: UseGameOptions) {
   const { gameId, onMove, onGameOver, onDrawOffered, onError } = options;
-  const { user, token } = useAuth();
+  const user = useAuthStore((state) => state.user);
+  const token = useAuthStore((state) => state.accessToken);
 
   const socketRef = useRef<Socket | null>(null);
+  const gameIdRef = useRef(gameId);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [spectatorCount, setSpectatorCount] = useState(0);
   const [opponentConnected, setOpponentConnected] = useState(false);
 
+  // Keep gameIdRef in sync
+  useEffect(() => {
+    gameIdRef.current = gameId;
+  }, [gameId]);
+
   // Initialize WebSocket connection
   useEffect(() => {
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8081';
+    const currentGameId = gameId;
 
     const socket = io(wsUrl, {
       auth: {
@@ -68,7 +76,7 @@ export function useGame(options: UseGameOptions) {
       // Join the game room
       socket.emit('message', {
         type: 'join_game',
-        gameId,
+        gameId: currentGameId,
       });
     });
 
@@ -88,7 +96,7 @@ export function useGame(options: UseGameOptions) {
     return () => {
       socket.emit('message', {
         type: 'leave_game',
-        gameId,
+        gameId: currentGameId,
       });
       socket.disconnect();
     };

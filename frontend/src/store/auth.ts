@@ -1,13 +1,16 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api, authApi, User } from '@/lib/api';
+import { clearQueryCache } from '@/lib/query-client';
 
 interface AuthState {
   user: User | null;
   accessToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isHydrated: boolean;
   error: string | null;
+  _refreshInProgress: Promise<boolean> | null;
 
   // Actions
   login: (email: string, password: string) => Promise<boolean>;
@@ -21,6 +24,7 @@ interface AuthState {
   refreshToken: () => Promise<boolean>;
   clearError: () => void;
   setUser: (user: User | null) => void;
+  setHydrated: () => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -30,7 +34,9 @@ export const useAuthStore = create<AuthState>()(
       accessToken: null,
       isAuthenticated: false,
       isLoading: false,
+      isHydrated: false,
       error: null,
+      _refreshInProgress: null,
 
       login: async (email: string, password: string) => {
         set({ isLoading: true, error: null });
@@ -83,6 +89,8 @@ export const useAuthStore = create<AuthState>()(
       logout: async () => {
         await authApi.logout();
         api.setAccessToken(null);
+        // Clear React Query cache to remove any user-specific data
+        clearQueryCache();
         set({
           user: null,
           accessToken: null,
@@ -92,27 +100,42 @@ export const useAuthStore = create<AuthState>()(
       },
 
       refreshToken: async () => {
-        const response = await authApi.refreshToken();
+        // Prevent concurrent refresh requests
+        const existingRefresh = get()._refreshInProgress;
+        if (existingRefresh) {
+          return existingRefresh;
+        }
 
-        if (response.error) {
-          // Token refresh failed, logout user
-          get().logout();
+        const refreshPromise = (async () => {
+          const response = await authApi.refreshToken();
+
+          if (response.error) {
+            // Token refresh failed, logout user
+            set({ _refreshInProgress: null });
+            get().logout();
+            return false;
+          }
+
+          if (response.data) {
+            const { accessToken } = response.data;
+            api.setAccessToken(accessToken);
+            set({ accessToken, _refreshInProgress: null });
+            return true;
+          }
+
+          set({ _refreshInProgress: null });
           return false;
-        }
+        })();
 
-        if (response.data) {
-          const { accessToken } = response.data;
-          api.setAccessToken(accessToken);
-          set({ accessToken });
-          return true;
-        }
-
-        return false;
+        set({ _refreshInProgress: refreshPromise });
+        return refreshPromise;
       },
 
       clearError: () => set({ error: null }),
 
       setUser: (user) => set({ user }),
+
+      setHydrated: () => set({ isHydrated: true }),
     }),
     {
       name: 'openpairing-auth',
@@ -126,6 +149,8 @@ export const useAuthStore = create<AuthState>()(
         if (state?.accessToken) {
           api.setAccessToken(state.accessToken);
         }
+        // Mark hydration as complete
+        state?.setHydrated();
       },
     }
   )
