@@ -10,18 +10,61 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// ArbiterAssignment represents an arbiter assigned to a tournament
+type ArbiterAssignment struct {
+	TournamentID uuid.UUID `json:"tournamentId" db:"tournament_id"`
+	UserID       uuid.UUID `json:"userId" db:"user_id"`
+	Role         string    `json:"role" db:"role"` // "chief", "assistant"
+}
+
+// ArbiterRepository provides access to arbiter assignments
+type ArbiterRepository interface {
+	GetArbiterAssignment(ctx context.Context, tournamentID, userID uuid.UUID) (*ArbiterAssignment, error)
+	IsOrganizationMember(ctx context.Context, organizationID, userID uuid.UUID) (bool, error)
+}
+
 // Service provides arbiter-specific business logic
 type Service struct {
 	tournamentRepo tournament.Repository
+	arbiterRepo    ArbiterRepository
 	logger         zerolog.Logger
 }
 
 // NewService creates a new arbiter service
-func NewService(tournamentRepo tournament.Repository, logger zerolog.Logger) *Service {
+func NewService(tournamentRepo tournament.Repository, arbiterRepo ArbiterRepository, logger zerolog.Logger) *Service {
 	return &Service{
 		tournamentRepo: tournamentRepo,
+		arbiterRepo:    arbiterRepo,
 		logger:         logger.With().Str("service", "arbiter").Logger(),
 	}
+}
+
+// canManageTournament checks if the arbiter has permission to manage the tournament
+func (s *Service) canManageTournament(ctx context.Context, tournamentID, arbiterID uuid.UUID) error {
+	tourney, err := s.tournamentRepo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return fmt.Errorf("tournament not found: %w", err)
+	}
+
+	// Check if arbiter has a specific assignment for this tournament
+	if s.arbiterRepo != nil {
+		assignment, err := s.arbiterRepo.GetArbiterAssignment(ctx, tournamentID, arbiterID)
+		if err == nil && assignment != nil {
+			return nil // Arbiter is assigned to this tournament
+		}
+
+		// Check if arbiter is a member of the tournament's organization
+		if tourney.OrganizationID != nil {
+			isMember, err := s.arbiterRepo.IsOrganizationMember(ctx, *tourney.OrganizationID, arbiterID)
+			if err == nil && isMember {
+				return nil // Arbiter is a member of the organization
+			}
+		}
+	}
+
+	// If no arbiter repo or checks failed, deny access
+	// In a production system, you might want to allow site admins here
+	return fmt.Errorf("arbiter not authorized for this tournament")
 }
 
 // AuditAction represents an auditable arbiter action
@@ -78,18 +121,23 @@ type TournamentStatistics struct {
 }
 
 // GetTournamentStatus gets the current tournament status for the arbiter console
-func (s *Service) GetTournamentStatus(ctx context.Context, tournamentID uuid.UUID) (*TournamentStatus, error) {
+func (s *Service) GetTournamentStatus(ctx context.Context, tournamentID uuid.UUID, arbiterID uuid.UUID) (*TournamentStatus, error) {
+	// Verify arbiter has permission for this tournament
+	if err := s.canManageTournament(ctx, tournamentID, arbiterID); err != nil {
+		return nil, err
+	}
+
 	tourney, err := s.tournamentRepo.GetByID(ctx, tournamentID)
 	if err != nil {
 		return nil, fmt.Errorf("tournament not found: %w", err)
 	}
 
-	participants, _, err := s.tournamentRepo.GetParticipants(ctx, tournamentID, &tournament.ParticipantFilter{})
+	participants, err := s.tournamentRepo.ListParticipants(ctx, tournamentID)
 	if err != nil {
 		return nil, err
 	}
 
-	rounds, err := s.tournamentRepo.GetRounds(ctx, tournamentID)
+	rounds, err := s.tournamentRepo.ListRounds(ctx, tournamentID)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +159,7 @@ func (s *Service) GetTournamentStatus(ctx context.Context, tournamentID uuid.UUI
 	var pendingResults int
 
 	if currentRound != nil {
-		games, err := s.tournamentRepo.GetGamesByRound(ctx, currentRound.ID)
+		games, err := s.tournamentRepo.ListGamesByRound(ctx, currentRound.ID)
 		if err == nil {
 			participantMap := make(map[uuid.UUID]*tournament.Participant)
 			for i := range participants {
@@ -150,7 +198,7 @@ func (s *Service) GetTournamentStatus(ctx context.Context, tournamentID uuid.UUI
 
 					activeGames = append(activeGames, gs)
 
-					if games[i].Result == "" {
+					if games[i].Result == nil || *games[i].Result == "" {
 						pendingResults++
 					}
 				}
@@ -207,7 +255,12 @@ type WithdrawPlayerRequest struct {
 
 // WithdrawPlayer withdraws a player from the tournament
 func (s *Service) WithdrawPlayer(ctx context.Context, req *WithdrawPlayerRequest, arbiterID uuid.UUID) error {
-	participant, err := s.tournamentRepo.GetParticipantByID(ctx, req.ParticipantID)
+	// Verify arbiter has permission for this tournament
+	if err := s.canManageTournament(ctx, req.TournamentID, arbiterID); err != nil {
+		return err
+	}
+
+	participant, err := s.tournamentRepo.GetParticipant(ctx, req.ParticipantID)
 	if err != nil {
 		return fmt.Errorf("participant not found: %w", err)
 	}
@@ -221,12 +274,7 @@ func (s *Service) WithdrawPlayer(ctx context.Context, req *WithdrawPlayerRequest
 	}
 
 	// Check if there's an ongoing game
-	tourney, err := s.tournamentRepo.GetByID(ctx, req.TournamentID)
-	if err != nil {
-		return err
-	}
-
-	rounds, err := s.tournamentRepo.GetRounds(ctx, req.TournamentID)
+	rounds, err := s.tournamentRepo.ListRounds(ctx, req.TournamentID)
 	if err != nil {
 		return err
 	}
@@ -235,7 +283,7 @@ func (s *Service) WithdrawPlayer(ctx context.Context, req *WithdrawPlayerRequest
 	for _, r := range rounds {
 		if r.Status == tournament.RoundStatusOngoing {
 			// Check if player has an ongoing game
-			games, err := s.tournamentRepo.GetGamesByRound(ctx, r.ID)
+			games, err := s.tournamentRepo.ListGamesByRound(ctx, r.ID)
 			if err != nil {
 				continue
 			}
@@ -243,14 +291,16 @@ func (s *Service) WithdrawPlayer(ctx context.Context, req *WithdrawPlayerRequest
 			for _, g := range games {
 				if (g.WhiteParticipantID != nil && *g.WhiteParticipantID == req.ParticipantID) ||
 					(g.BlackParticipantID != nil && *g.BlackParticipantID == req.ParticipantID) {
-					if g.Result == "" {
+					if g.Result == nil || *g.Result == "" {
 						// Enter forfeit result
 						if g.WhiteParticipantID != nil && *g.WhiteParticipantID == req.ParticipantID {
-							g.Result = "0-1F"
+							result := "0-1F"
+							g.Result = &result
 							g.WhiteScore = floatPtr(0)
 							g.BlackScore = floatPtr(1)
 						} else {
-							g.Result = "1-0F"
+							result := "1-0F"
+							g.Result = &result
 							g.WhiteScore = floatPtr(1)
 							g.BlackScore = floatPtr(0)
 						}
@@ -265,7 +315,7 @@ func (s *Service) WithdrawPlayer(ctx context.Context, req *WithdrawPlayerRequest
 
 						s.logger.Info().
 							Str("game_id", g.ID.String()).
-							Str("result", g.Result).
+							Str("result", *g.Result).
 							Msg("Forfeit result entered for withdrawn player")
 					}
 				}
@@ -276,7 +326,6 @@ func (s *Service) WithdrawPlayer(ctx context.Context, req *WithdrawPlayerRequest
 	// Update participant status
 	participant.IsActive = false
 	participant.RegistrationStatus = "withdrawn"
-	participant.UpdatedAt = time.Now()
 
 	if err := s.tournamentRepo.UpdateParticipant(ctx, participant); err != nil {
 		return fmt.Errorf("failed to update participant: %w", err)
@@ -320,12 +369,17 @@ type AssignByeRequest struct {
 
 // AssignBye assigns a bye to a player
 func (s *Service) AssignBye(ctx context.Context, req *AssignByeRequest, arbiterID uuid.UUID) error {
-	participant, err := s.tournamentRepo.GetParticipantByID(ctx, req.ParticipantID)
+	// Verify arbiter has permission for this tournament
+	if err := s.canManageTournament(ctx, req.TournamentID, arbiterID); err != nil {
+		return err
+	}
+
+	participant, err := s.tournamentRepo.GetParticipant(ctx, req.ParticipantID)
 	if err != nil {
 		return fmt.Errorf("participant not found: %w", err)
 	}
 
-	round, err := s.tournamentRepo.GetRound(ctx, req.TournamentID, req.RoundNumber)
+	round, err := s.tournamentRepo.GetRoundByNumber(ctx, req.TournamentID, req.RoundNumber)
 	if err != nil {
 		return fmt.Errorf("round not found: %w", err)
 	}
@@ -350,6 +404,7 @@ func (s *Service) AssignBye(ctx context.Context, req *AssignByeRequest, arbiterI
 	}
 
 	// Create bye game
+	byeResult := "BYE"
 	game := tournament.Game{
 		ID:                 uuid.New(),
 		TournamentID:       req.TournamentID,
@@ -357,7 +412,7 @@ func (s *Service) AssignBye(ctx context.Context, req *AssignByeRequest, arbiterI
 		BoardNumber:        0, // Byes are typically board 0 or last
 		WhiteParticipantID: &req.ParticipantID,
 		BlackParticipantID: nil,
-		Result:             "BYE",
+		Result:             &byeResult,
 		WhiteScore:         &score,
 		BlackScore:         floatPtr(0),
 		Status:             tournament.GameStatusCompleted,
@@ -410,6 +465,11 @@ type CorrectResultRequest struct {
 
 // CorrectResult corrects a game result
 func (s *Service) CorrectResult(ctx context.Context, req *CorrectResultRequest, arbiterID uuid.UUID) error {
+	// Verify arbiter has permission for this tournament
+	if err := s.canManageTournament(ctx, req.TournamentID, arbiterID); err != nil {
+		return err
+	}
+
 	game, err := s.tournamentRepo.GetGame(ctx, req.GameID)
 	if err != nil {
 		return fmt.Errorf("game not found: %w", err)
@@ -419,7 +479,10 @@ func (s *Service) CorrectResult(ctx context.Context, req *CorrectResultRequest, 
 		return fmt.Errorf("game not in this tournament")
 	}
 
-	oldResult := game.Result
+	oldResult := ""
+	if game.Result != nil {
+		oldResult = *game.Result
+	}
 	oldWhiteScore := game.WhiteScore
 	oldBlackScore := game.BlackScore
 
@@ -430,7 +493,7 @@ func (s *Service) CorrectResult(ctx context.Context, req *CorrectResultRequest, 
 	}
 
 	// Update game
-	game.Result = req.NewResult
+	game.Result = &req.NewResult
 	game.WhiteScore = &whiteScore
 	game.BlackScore = &blackScore
 	now := time.Now()
@@ -443,7 +506,7 @@ func (s *Service) CorrectResult(ctx context.Context, req *CorrectResultRequest, 
 
 	// Update participant scores
 	if game.WhiteParticipantID != nil {
-		white, err := s.tournamentRepo.GetParticipantByID(ctx, *game.WhiteParticipantID)
+		white, err := s.tournamentRepo.GetParticipant(ctx, *game.WhiteParticipantID)
 		if err == nil {
 			// Reverse old score
 			if oldWhiteScore != nil {
@@ -456,7 +519,7 @@ func (s *Service) CorrectResult(ctx context.Context, req *CorrectResultRequest, 
 	}
 
 	if game.BlackParticipantID != nil {
-		black, err := s.tournamentRepo.GetParticipantByID(ctx, *game.BlackParticipantID)
+		black, err := s.tournamentRepo.GetParticipant(ctx, *game.BlackParticipantID)
 		if err == nil {
 			// Reverse old score
 			if oldBlackScore != nil {
@@ -522,7 +585,12 @@ type SwapPairingRequest struct {
 
 // SwapPairing swaps two players between pairings
 func (s *Service) SwapPairing(ctx context.Context, req *SwapPairingRequest, arbiterID uuid.UUID) error {
-	round, err := s.tournamentRepo.GetRound(ctx, req.TournamentID, req.RoundNumber)
+	// Verify arbiter has permission for this tournament
+	if err := s.canManageTournament(ctx, req.TournamentID, arbiterID); err != nil {
+		return err
+	}
+
+	round, err := s.tournamentRepo.GetRoundByNumber(ctx, req.TournamentID, req.RoundNumber)
 	if err != nil {
 		return fmt.Errorf("round not found: %w", err)
 	}
@@ -614,6 +682,11 @@ type ChangeColorRequest struct {
 
 // ChangeColor swaps the colors in a game
 func (s *Service) ChangeColor(ctx context.Context, req *ChangeColorRequest, arbiterID uuid.UUID) error {
+	// Verify arbiter has permission for this tournament
+	if err := s.canManageTournament(ctx, req.TournamentID, arbiterID); err != nil {
+		return err
+	}
+
 	game, err := s.tournamentRepo.GetGame(ctx, req.GameID)
 	if err != nil {
 		return fmt.Errorf("game not found: %w", err)
@@ -623,7 +696,7 @@ func (s *Service) ChangeColor(ctx context.Context, req *ChangeColorRequest, arbi
 		return fmt.Errorf("game not in this tournament")
 	}
 
-	if game.Result != "" {
+	if game.Result != nil && *game.Result != "" {
 		return fmt.Errorf("cannot change colors after result is entered")
 	}
 
@@ -654,7 +727,12 @@ func (s *Service) ChangeColor(ctx context.Context, req *ChangeColorRequest, arbi
 }
 
 // GetAuditLog retrieves the audit log for a tournament
-func (s *Service) GetAuditLog(ctx context.Context, tournamentID uuid.UUID, limit int) ([]AuditAction, error) {
+func (s *Service) GetAuditLog(ctx context.Context, tournamentID uuid.UUID, arbiterID uuid.UUID, limit int) ([]AuditAction, error) {
+	// Verify arbiter has permission for this tournament
+	if err := s.canManageTournament(ctx, tournamentID, arbiterID); err != nil {
+		return nil, err
+	}
+
 	// This would be implemented with a proper audit log repository
 	// For now, return empty slice
 	return []AuditAction{}, nil
@@ -691,6 +769,11 @@ type CreateAnnouncementRequest struct {
 
 // CreateAnnouncement creates a tournament announcement
 func (s *Service) CreateAnnouncement(ctx context.Context, req *CreateAnnouncementRequest, arbiterID uuid.UUID) (*Announcement, error) {
+	// Verify arbiter has permission for this tournament
+	if err := s.canManageTournament(ctx, req.TournamentID, arbiterID); err != nil {
+		return nil, err
+	}
+
 	announcement := &Announcement{
 		ID:           uuid.New(),
 		TournamentID: req.TournamentID,

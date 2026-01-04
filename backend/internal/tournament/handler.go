@@ -209,9 +209,9 @@ func (h *Handler) DeleteTournament(c *gin.Context) {
 // @Success 200 {object} TournamentListResponse
 // @Router /tournaments [get]
 func (h *Handler) ListTournaments(c *gin.Context) {
-	filter := &TournamentFilter{
-		Limit:  20,
-		Offset: 0,
+	filter := &ListFilters{
+		Limit: 20,
+		Page:  0,
 	}
 
 	if status := c.Query("status"); status != "" {
@@ -225,7 +225,7 @@ func (h *Handler) ListTournaments(c *gin.Context) {
 	}
 	if offset := c.Query("offset"); offset != "" {
 		if o, err := strconv.Atoi(offset); err == nil {
-			filter.Offset = o
+			filter.Page = o / filter.Limit // Convert offset to page
 		}
 	}
 
@@ -237,9 +237,9 @@ func (h *Handler) ListTournaments(c *gin.Context) {
 
 	c.JSON(http.StatusOK, TournamentListResponse{
 		Tournaments: tournaments,
-		Total:       total,
+		Total:       int(total),
 		Limit:       filter.Limit,
-		Offset:      filter.Offset,
+		Offset:      filter.Page * filter.Limit,
 	})
 }
 
@@ -328,7 +328,7 @@ func (h *Handler) GetParticipants(c *gin.Context) {
 		filter.ActiveOnly = true
 	}
 
-	participants, total, err := h.service.GetParticipants(c.Request.Context(), id, filter)
+	participants, err := h.service.GetParticipants(c.Request.Context(), id, filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -336,7 +336,7 @@ func (h *Handler) GetParticipants(c *gin.Context) {
 
 	c.JSON(http.StatusOK, ParticipantListResponse{
 		Participants: participants,
-		Total:        total,
+		Total:        len(participants),
 	})
 }
 

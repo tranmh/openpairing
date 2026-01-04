@@ -171,75 +171,82 @@ func (p *Parser) Parse(reader io.Reader) (*TRFFile, error) {
 }
 
 // parsePlayerLine parses a 001 player line
-// Format: 001 SSSS  T  NAME                            RTNG FED   FIDE   BDAY  PTS  RANK RND1 RND2 ...
-//         001    1  GM Carlsen, Magnus                 2830 NOR   1503014 1990  7.5     1  w    2  b   15
+// Format matches generator output:
+// 001 SSSS S TTT NAME_____________________________RTNG FED FIDE_ID____BDAY______PTS_RANK rounds...
+// Positions (0-indexed):
+// 0-3: "001 ", 4-7: start number, 8: space, 9: sex, 10: space
+// 11-13: title, 14: space, 15-47: name (33 chars)
+// 48-51: rating, 52: space, 53-55: federation, 56: space
+// 57-67: FIDE ID (11 chars), 68-77: birth date (10 chars)
+// 78-81: points, 82: space, 83-86: rank
+// 87+: round results (8 chars each)
 func (p *Parser) parsePlayerLine(line string) (TRFPlayer, error) {
 	player := TRFPlayer{}
 
-	if len(line) < 80 {
-		// Pad line to minimum length
-		line = line + strings.Repeat(" ", 80-len(line))
+	if len(line) < 48 {
+		// Pad line to minimum length for basic parsing
+		line = line + strings.Repeat(" ", 48-len(line))
 	}
 
-	// Start number (columns 5-8)
+	// Start number (columns 4-7, 0-indexed)
 	startNo, err := strconv.Atoi(strings.TrimSpace(line[4:8]))
 	if err != nil {
 		return player, fmt.Errorf("invalid start number: %w", err)
 	}
 	player.StartNo = startNo
 
-	// Sex (column 10)
+	// Sex (column 9)
 	if len(line) > 9 {
 		player.Sex = strings.TrimSpace(string(line[9]))
 	}
 
 	// Title (columns 11-13)
-	if len(line) > 13 {
-		player.Title = strings.TrimSpace(line[10:14])
+	if len(line) > 14 {
+		player.Title = strings.TrimSpace(line[11:14])
 	}
 
-	// Name (columns 15-47)
+	// Name (columns 15-47, 33 chars)
 	if len(line) > 47 {
-		player.Name = strings.TrimSpace(line[14:47])
+		player.Name = strings.TrimSpace(line[15:48])
 	}
 
-	// Rating (columns 49-52)
-	if len(line) > 52 {
+	// Rating (columns 48-51)
+	if len(line) > 51 {
 		rating, _ := strconv.Atoi(strings.TrimSpace(line[48:52]))
 		player.Rating = rating
 	}
 
-	// Federation (columns 54-56)
-	if len(line) > 56 {
+	// Federation (columns 53-55)
+	if len(line) > 55 {
 		player.Federation = strings.TrimSpace(line[53:56])
 	}
 
-	// FIDE ID (columns 58-68)
-	if len(line) > 68 {
+	// FIDE ID (columns 57-67, 11 chars)
+	if len(line) > 67 {
 		player.FideID = strings.TrimSpace(line[57:68])
 	}
 
-	// Birth date (columns 70-79)
-	if len(line) > 79 {
-		player.BirthDate = strings.TrimSpace(line[69:79])
+	// Birth date (columns 68-77, 10 chars)
+	if len(line) > 77 {
+		player.BirthDate = strings.TrimSpace(line[68:78])
 	}
 
-	// Points (columns 81-84)
-	if len(line) > 84 {
-		pointsStr := strings.TrimSpace(line[80:84])
+	// Points (columns 78-81, 4 chars)
+	if len(line) > 81 {
+		pointsStr := strings.TrimSpace(line[78:82])
 		points, _ := strconv.ParseFloat(pointsStr, 64)
 		player.Points = points
 	}
 
-	// Rank (columns 86-89)
-	if len(line) > 89 {
-		rank, _ := strconv.Atoi(strings.TrimSpace(line[85:89]))
+	// Rank (columns 83-86, 4 chars)
+	if len(line) > 86 {
+		rank, _ := strconv.Atoi(strings.TrimSpace(line[83:87]))
 		player.Rank = rank
 	}
 
-	// Round results start at column 92 (91 in 0-indexed)
-	// Each round result is 8 characters: "  c  opp" where c=color, opp=opponent
-	roundStart := 91
+	// Round results start at column 87
+	// Each round result is 8 characters: "  c r ooo"
+	roundStart := 87
 	roundWidth := 8
 	roundNum := 1
 
@@ -254,7 +261,10 @@ func (p *Parser) parsePlayerLine(line string) (TRFPlayer, error) {
 }
 
 // parseRoundResult parses a single round result
-// Format: "  c  opp" or " res opp" where res includes color
+// TRF format: 8 characters per round: "  c r ooo"
+// Position 2: color (w/b/-)
+// Position 4: result (1/0/=/+/-/H/F/U/Z)
+// Positions 5-7: opponent number (3 digits, right-justified)
 func (p *Parser) parseRoundResult(round int, data string) TRFRoundResult {
 	result := TRFRoundResult{Round: round}
 
@@ -263,19 +273,23 @@ func (p *Parser) parseRoundResult(round int, data string) TRFRoundResult {
 	}
 
 	// Color is at position 2 (0-indexed)
-	color := strings.TrimSpace(string(data[2]))
-	if color == "w" || color == "b" || color == "-" {
-		result.Color = color
+	if len(data) > 2 {
+		color := string(data[2])
+		if color == "w" || color == "b" || color == "-" {
+			result.Color = color
+		}
 	}
 
-	// Result is at position 3-4 or combined with color
-	resultStr := strings.TrimSpace(data[2:5])
-	if len(resultStr) > 1 {
-		// Parse result character
-		switch string(resultStr[len(resultStr)-1]) {
+	// Result is at position 4
+	if len(data) > 4 {
+		resultChar := string(data[4])
+		switch resultChar {
 		case "1", "+", "W":
 			result.Result = "1"
-		case "0", "-", "L":
+		case "0", "L":
+			result.Result = "0"
+		case "-":
+			// Could be loss or unpaired - check if we have an opponent
 			result.Result = "0"
 		case "=", "D":
 			result.Result = "="
@@ -290,11 +304,13 @@ func (p *Parser) parseRoundResult(round int, data string) TRFRoundResult {
 		}
 	}
 
-	// Opponent number is at positions 5-7 (0-indexed)
-	oppStr := strings.TrimSpace(data[4:8])
-	if oppStr != "" && oppStr != "0000" {
-		opp, _ := strconv.Atoi(oppStr)
-		result.OpponentNo = opp
+	// Opponent number is at positions 5-7 (3 digits, right-justified)
+	if len(data) >= 8 {
+		oppStr := strings.TrimSpace(data[5:8])
+		if oppStr != "" && oppStr != "000" {
+			opp, _ := strconv.Atoi(oppStr)
+			result.OpponentNo = opp
+		}
 	}
 
 	return result

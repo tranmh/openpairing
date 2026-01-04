@@ -10,12 +10,13 @@ import (
 
 // GameManager manages active chess games
 type GameManager struct {
-	games       map[uuid.UUID]*GameState
-	userGames   map[uuid.UUID]uuid.UUID // user ID -> game ID
-	mutex       sync.RWMutex
-	logger      zerolog.Logger
-	clockTicker *time.Ticker
-	stopChan    chan struct{}
+	games         map[uuid.UUID]*GameState
+	userGames     map[uuid.UUID]uuid.UUID // user ID -> game ID
+	mutex         sync.RWMutex
+	logger        zerolog.Logger
+	clockTicker   *time.Ticker
+	cleanupTicker *time.Ticker
+	stopChan      chan struct{}
 }
 
 // NewGameManager creates a new game manager
@@ -31,6 +32,10 @@ func NewGameManager(logger zerolog.Logger) *GameManager {
 	gm.clockTicker = time.NewTicker(100 * time.Millisecond)
 	go gm.clockLoop()
 
+	// Start cleanup goroutine to remove completed games after a delay
+	gm.cleanupTicker = time.NewTicker(5 * time.Minute)
+	go gm.cleanupLoop()
+
 	return gm
 }
 
@@ -38,6 +43,7 @@ func NewGameManager(logger zerolog.Logger) *GameManager {
 func (gm *GameManager) Stop() {
 	close(gm.stopChan)
 	gm.clockTicker.Stop()
+	gm.cleanupTicker.Stop()
 }
 
 func (gm *GameManager) clockLoop() {
@@ -48,6 +54,37 @@ func (gm *GameManager) clockLoop() {
 		case <-gm.stopChan:
 			return
 		}
+	}
+}
+
+func (gm *GameManager) cleanupLoop() {
+	for {
+		select {
+		case <-gm.cleanupTicker.C:
+			gm.cleanupCompletedGames()
+		case <-gm.stopChan:
+			return
+		}
+	}
+}
+
+// cleanupCompletedGames removes completed/aborted games that ended more than 10 minutes ago
+func (gm *GameManager) cleanupCompletedGames() {
+	gm.mutex.Lock()
+	defer gm.mutex.Unlock()
+
+	cutoff := time.Now().Add(-10 * time.Minute)
+	removed := 0
+
+	for id, game := range gm.games {
+		if (game.Status == StatusCompleted || game.Status == StatusAborted) && game.CompletedAt != nil && game.CompletedAt.Before(cutoff) {
+			delete(gm.games, id)
+			removed++
+		}
+	}
+
+	if removed > 0 {
+		gm.logger.Info().Int("removed", removed).Int("remaining", len(gm.games)).Msg("Cleaned up old games")
 	}
 }
 

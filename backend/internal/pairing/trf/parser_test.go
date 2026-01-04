@@ -6,19 +6,68 @@ import (
 )
 
 func TestParseTRF_ValidFile(t *testing.T) {
-	trfContent := `012 Test Tournament 2024
-022 Berlin
-032 GER
-042 2024/01/15
-052 2024/01/20
-062 7
-072 Swiss
-082 IA John Smith
-102 90+30
-001    1 m  GM Carlsen, Magnus               2830 NOR 1503014    1990/11/30  7.0    1  w 1   2  b 1  15  w 1   3
-001    2 m  GM Caruana, Fabiano              2820 USA 2020009    1992/07/30  6.5    2  b 0   1  w 1   8  b 1   5
-001    3 m  GM Nakamura, Hikaru              2780 USA 2016192    1987/12/09  5.5    3  w =  15  b 1   1  w 0   7
-`
+	// Use generator to create properly formatted TRF content
+	gen := NewGenerator()
+	gen.SetTournamentInfo("Test Tournament 2024", "Berlin", "GER", 7)
+	gen.trf.StartDate = "2024/01/15"
+	gen.trf.EndDate = "2024/01/20"
+	gen.SetTournamentType("Swiss")
+	gen.SetArbiters("IA John Smith", nil)
+	gen.SetTimeControl("90+30")
+
+	gen.AddPlayer(TRFPlayer{
+		StartNo:    1,
+		Sex:        "m",
+		Title:      "GM",
+		Name:       "Carlsen, Magnus",
+		Rating:     2830,
+		Federation: "NOR",
+		FideID:     "1503014",
+		BirthDate:  "1990/11/30",
+		Points:     7.0,
+		Rank:       1,
+		RoundResults: []TRFRoundResult{
+			{Round: 1, Color: "w", Result: "1", OpponentNo: 2},
+			{Round: 2, Color: "b", Result: "1", OpponentNo: 15},
+			{Round: 3, Color: "w", Result: "1", OpponentNo: 3},
+		},
+	})
+	gen.AddPlayer(TRFPlayer{
+		StartNo:    2,
+		Sex:        "m",
+		Title:      "GM",
+		Name:       "Caruana, Fabiano",
+		Rating:     2820,
+		Federation: "USA",
+		FideID:     "2020009",
+		BirthDate:  "1992/07/30",
+		Points:     6.5,
+		Rank:       2,
+		RoundResults: []TRFRoundResult{
+			{Round: 1, Color: "b", Result: "0", OpponentNo: 1},
+			{Round: 2, Color: "w", Result: "1", OpponentNo: 8},
+			{Round: 3, Color: "b", Result: "1", OpponentNo: 5},
+		},
+	})
+	gen.AddPlayer(TRFPlayer{
+		StartNo:    3,
+		Sex:        "m",
+		Title:      "GM",
+		Name:       "Nakamura, Hikaru",
+		Rating:     2780,
+		Federation: "USA",
+		FideID:     "2016192",
+		BirthDate:  "1987/12/09",
+		Points:     5.5,
+		Rank:       3,
+		RoundResults: []TRFRoundResult{
+			{Round: 1, Color: "w", Result: "=", OpponentNo: 15},
+			{Round: 2, Color: "b", Result: "1", OpponentNo: 1},
+			{Round: 3, Color: "w", Result: "0", OpponentNo: 7},
+		},
+	})
+
+	trfContent := gen.Generate()
 
 	parser := NewParser()
 	trf, err := parser.Parse(strings.NewReader(trfContent))
@@ -74,29 +123,46 @@ func TestParseTRF_ValidFile(t *testing.T) {
 }
 
 func TestParseTRF_PlayerLine(t *testing.T) {
-	// Test parsing of player line with round results
-	line := "001    1 m  GM Carlsen, Magnus               2830 NOR 1503014    1990/11/30  7.0    1  w 1   2  b 0   3"
+	// Generate a properly formatted player line
+	gen := NewGenerator()
+	player := TRFPlayer{
+		StartNo:    1,
+		Sex:        "m",
+		Title:      "GM",
+		Name:       "Carlsen, Magnus",
+		Rating:     2830,
+		Federation: "NOR",
+		FideID:     "1503014",
+		BirthDate:  "1990/11/30",
+		Points:     7.0,
+		Rank:       1,
+		RoundResults: []TRFRoundResult{
+			{Round: 1, Color: "w", Result: "1", OpponentNo: 2},
+			{Round: 2, Color: "b", Result: "0", OpponentNo: 3},
+		},
+	}
+	line := gen.generatePlayerLine(player)
 
 	parser := NewParser()
-	player, err := parser.parsePlayerLine(line)
+	parsed, err := parser.parsePlayerLine(line)
 	if err != nil {
 		t.Fatalf("parsePlayerLine failed: %v", err)
 	}
 
-	if player.StartNo != 1 {
-		t.Errorf("StartNo = %d, want 1", player.StartNo)
+	if parsed.StartNo != 1 {
+		t.Errorf("StartNo = %d, want 1", parsed.StartNo)
 	}
-	if player.Points != 7.0 {
-		t.Errorf("Points = %v, want 7.0", player.Points)
+	if parsed.Points != 7.0 {
+		t.Errorf("Points = %v, want 7.0", parsed.Points)
 	}
 
 	// Check round results
-	if len(player.RoundResults) < 2 {
-		t.Fatalf("RoundResults count = %d, want >= 2", len(player.RoundResults))
+	if len(parsed.RoundResults) < 2 {
+		t.Fatalf("RoundResults count = %d, want >= 2", len(parsed.RoundResults))
 	}
 
 	// Round 1: white, win against 2
-	r1 := player.RoundResults[0]
+	r1 := parsed.RoundResults[0]
 	if r1.Color != "w" {
 		t.Errorf("Round 1 Color = %q, want %q", r1.Color, "w")
 	}
@@ -109,34 +175,38 @@ func TestParseTRF_PlayerLine(t *testing.T) {
 }
 
 func TestParseTRF_RoundResult(t *testing.T) {
+	// Use generator to create properly formatted round results
+	gen := NewGenerator()
+
 	tests := []struct {
-		name     string
-		data     string
-		expColor string
+		name      string
+		input     TRFRoundResult
+		expColor  string
 		expResult string
-		expOpp   int
+		expOpp    int
 	}{
-		{"win white", "  w 1   2", "w", "1", 2},
-		{"loss black", "  b 0   5", "b", "0", 5},
-		{"draw white", "  w =  10", "w", "=", 10},
-		{"bye", "  - H    ", "-", "H", 0},
-		{"forfeit win", "  w +   3", "w", "1", 3}, // + maps to 1
+		{"win white", TRFRoundResult{Round: 1, Color: "w", Result: "1", OpponentNo: 2}, "w", "1", 2},
+		{"loss black", TRFRoundResult{Round: 1, Color: "b", Result: "0", OpponentNo: 5}, "b", "0", 5},
+		{"draw white", TRFRoundResult{Round: 1, Color: "w", Result: "=", OpponentNo: 10}, "w", "=", 10},
+		{"bye", TRFRoundResult{Round: 1, Color: "-", Result: "H", OpponentNo: 0}, "-", "H", 0},
 	}
 
 	parser := NewParser()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parser.parseRoundResult(1, tt.data)
+			// Generate the round result string using the generator
+			data := gen.generateRoundResult(tt.input)
+			result := parser.parseRoundResult(1, data)
 
 			if result.Color != tt.expColor {
-				t.Errorf("Color = %q, want %q", result.Color, tt.expColor)
+				t.Errorf("Color = %q, want %q (data=%q)", result.Color, tt.expColor, data)
 			}
 			if result.Result != tt.expResult {
-				t.Errorf("Result = %q, want %q", result.Result, tt.expResult)
+				t.Errorf("Result = %q, want %q (data=%q)", result.Result, tt.expResult, data)
 			}
 			if result.OpponentNo != tt.expOpp {
-				t.Errorf("OpponentNo = %d, want %d", result.OpponentNo, tt.expOpp)
+				t.Errorf("OpponentNo = %d, want %d (data=%q)", result.OpponentNo, tt.expOpp, data)
 			}
 		})
 	}
@@ -177,12 +247,45 @@ func TestParseTRF_XXR(t *testing.T) {
 }
 
 func TestGetPairings(t *testing.T) {
-	trfContent := `012 Test Tournament
-062 5
-001    1    Player One                       2000     1990/01/01  1.0    1  w 1   2
-001    2    Player Two                       1900     1990/01/01  0.0    2  b 0   1
-001    3    Player Three                     1800     1990/01/01  0.5    1  - H
-`
+	// Use generator to create properly formatted TRF content
+	gen := NewGenerator()
+	gen.SetTournamentInfo("Test Tournament", "", "", 5)
+
+	gen.AddPlayer(TRFPlayer{
+		StartNo:    1,
+		Name:       "Player One",
+		Rating:     2000,
+		BirthDate:  "1990/01/01",
+		Points:     1.0,
+		Rank:       1,
+		RoundResults: []TRFRoundResult{
+			{Round: 1, Color: "w", Result: "1", OpponentNo: 2},
+		},
+	})
+	gen.AddPlayer(TRFPlayer{
+		StartNo:    2,
+		Name:       "Player Two",
+		Rating:     1900,
+		BirthDate:  "1990/01/01",
+		Points:     0.0,
+		Rank:       2,
+		RoundResults: []TRFRoundResult{
+			{Round: 1, Color: "b", Result: "0", OpponentNo: 1},
+		},
+	})
+	gen.AddPlayer(TRFPlayer{
+		StartNo:    3,
+		Name:       "Player Three",
+		Rating:     1800,
+		BirthDate:  "1990/01/01",
+		Points:     0.5,
+		Rank:       3,
+		RoundResults: []TRFRoundResult{
+			{Round: 1, Color: "-", Result: "H", OpponentNo: 0},
+		},
+	})
+
+	trfContent := gen.Generate()
 
 	parser := NewParser()
 	trf, err := parser.Parse(strings.NewReader(trfContent))

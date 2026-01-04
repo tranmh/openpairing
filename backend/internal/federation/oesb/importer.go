@@ -64,6 +64,7 @@ type ImportResult struct {
 	SkippedPlayers int
 	Errors         int
 	Duration       time.Duration
+	mu             sync.Mutex // protects concurrent counter updates
 }
 
 // ImportPlayer imports a single player by ÖSB ID
@@ -199,7 +200,6 @@ func (i *Importer) ImportRatingsList(ctx context.Context) (*ImportResult, error)
 
 // importWorker processes players from the channel
 func (i *Importer) importWorker(ctx context.Context, players <-chan *OESBPlayer, result *ImportResult) {
-	var mu sync.Mutex
 	var batch []*player.Player
 
 	for oesbPlayer := range players {
@@ -209,9 +209,9 @@ func (i *Importer) importWorker(ctx context.Context, players <-chan *OESBPlayer,
 		if len(batch) >= i.batchSize {
 			if err := i.processBatch(ctx, batch, result); err != nil {
 				i.logger.Warn().Err(err).Msg("Batch processing error")
-				mu.Lock()
+				result.mu.Lock()
 				result.Errors++
-				mu.Unlock()
+				result.mu.Unlock()
 			}
 			batch = batch[:0]
 		}
@@ -221,9 +221,9 @@ func (i *Importer) importWorker(ctx context.Context, players <-chan *OESBPlayer,
 	if len(batch) > 0 {
 		if err := i.processBatch(ctx, batch, result); err != nil {
 			i.logger.Warn().Err(err).Msg("Final batch processing error")
-			mu.Lock()
+			result.mu.Lock()
 			result.Errors++
-			mu.Unlock()
+			result.mu.Unlock()
 		}
 	}
 }
@@ -234,11 +234,9 @@ func (i *Importer) processBatch(ctx context.Context, batch []*player.Player, res
 		return fmt.Errorf("failed to upsert batch: %w", err)
 	}
 
-	// Thread-safe update
-	var mu sync.Mutex
-	mu.Lock()
+	result.mu.Lock()
 	result.UpdatedPlayers += len(batch)
-	mu.Unlock()
+	result.mu.Unlock()
 
 	return nil
 }

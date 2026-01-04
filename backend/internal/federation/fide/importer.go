@@ -70,6 +70,7 @@ type ImportResult struct {
 	UpdatedPlayers int
 	SkippedPlayers int
 	Errors         int
+	mu             sync.Mutex // protects concurrent counter updates
 }
 
 // ImportLatest downloads and imports the latest FIDE rating list
@@ -169,14 +170,13 @@ func (i *Importer) ImportLatest(ctx context.Context) (*ImportResult, error) {
 // importWorker processes players from the channel
 func (i *Importer) importWorker(ctx context.Context, workerID int, players <-chan *FIDEPlayer, result *ImportResult, errors chan<- error) {
 	var batch []*player.Player
-	var mu sync.Mutex
 
 	for fidePlayer := range players {
 		p := i.convertToPlayer(fidePlayer)
 		batch = append(batch, p)
 
 		if len(batch) >= i.batchSize {
-			if err := i.processBatch(ctx, batch, result, &mu); err != nil {
+			if err := i.processBatch(ctx, batch, result); err != nil {
 				select {
 				case errors <- err:
 				default:
@@ -188,7 +188,7 @@ func (i *Importer) importWorker(ctx context.Context, workerID int, players <-cha
 
 	// Process remaining batch
 	if len(batch) > 0 {
-		if err := i.processBatch(ctx, batch, result, &mu); err != nil {
+		if err := i.processBatch(ctx, batch, result); err != nil {
 			select {
 			case errors <- err:
 			default:
@@ -198,14 +198,14 @@ func (i *Importer) importWorker(ctx context.Context, workerID int, players <-cha
 }
 
 // processBatch processes a batch of players
-func (i *Importer) processBatch(ctx context.Context, batch []*player.Player, result *ImportResult, mu *sync.Mutex) error {
+func (i *Importer) processBatch(ctx context.Context, batch []*player.Player, result *ImportResult) error {
 	if err := i.playerRepo.BulkUpsertByFideID(ctx, batch); err != nil {
 		return fmt.Errorf("failed to upsert batch: %w", err)
 	}
 
-	mu.Lock()
+	result.mu.Lock()
 	result.UpdatedPlayers += len(batch)
-	mu.Unlock()
+	result.mu.Unlock()
 
 	return nil
 }

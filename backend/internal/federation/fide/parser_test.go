@@ -3,6 +3,8 @@ package fide
 import (
 	"strings"
 	"testing"
+
+	"github.com/rs/zerolog"
 )
 
 func TestParseName(t *testing.T) {

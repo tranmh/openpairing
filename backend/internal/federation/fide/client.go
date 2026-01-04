@@ -73,10 +73,10 @@ func (c *Client) DownloadLatestRatings(ratingType string) (*DownloadResult, erro
 func (c *Client) DownloadMonthlyRatings(year int, month time.Month) (*DownloadResult, error) {
 	monthStr := month.String()[:3]
 	monthStr = string(monthStr[0]) + string(monthStr[1]) + string(monthStr[2])
-	yearStr := fmt.Sprintf("%02d", year%100)
+	yearShort := year % 100
 
-	url := fmt.Sprintf(MonthlyListPattern, monthStr, yearStr)
-	filename := fmt.Sprintf("fide_standard_%s%s.zip", monthStr, yearStr)
+	url := fmt.Sprintf(MonthlyListPattern, monthStr, yearShort)
+	filename := fmt.Sprintf("fide_standard_%s%02d.zip", monthStr, yearShort)
 
 	return c.downloadFile(url, filename)
 }

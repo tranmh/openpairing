@@ -283,25 +283,35 @@ type ForbiddenPair struct {
 
 // CreateTournamentRequest is the request body for creating a tournament
 type CreateTournamentRequest struct {
+	OrganizationID     *uuid.UUID      `json:"organizationId,omitempty"`
 	Name               string          `json:"name" binding:"required,min=1,max=255"`
 	Description        *string         `json:"description,omitempty"`
+	Slug               string          `json:"slug,omitempty"`
 	Type               TournamentType  `json:"type" binding:"required,oneof=swiss round_robin knockout team_swiss"`
 	Mode               TournamentMode  `json:"mode" binding:"required,oneof=otb online hybrid"`
 	TimeControl        string          `json:"timeControl" binding:"required"`
 	TimeControlType    TimeControlType `json:"timeControlType" binding:"required,oneof=standard rapid blitz"`
+	PairingEngine      PairingEngine   `json:"pairingEngine" binding:"omitempty,oneof=javafo bbp"`
+	PairingSystem      PairingSystem   `json:"pairingSystem,omitempty"`
+	AcceleratedPairing bool            `json:"acceleratedPairing"`
 	Rounds             int             `json:"rounds" binding:"required,min=1,max=15"`
 	StartDate          string          `json:"startDate" binding:"required"`
 	EndDate            *string         `json:"endDate,omitempty"`
+	RegistrationOpens  *time.Time      `json:"registrationOpens,omitempty"`
+	RegistrationCloses *time.Time      `json:"registrationCloses,omitempty"`
 	MaxPlayers         *int            `json:"maxPlayers,omitempty"`
-	FideRated          bool            `json:"fideRated"`
-	DwzRated           bool            `json:"dwzRated"`
-	OesbRated          bool            `json:"oesbRated"`
-	PairingEngine      PairingEngine   `json:"pairingEngine" binding:"omitempty,oneof=javafo bbp"`
-	AcceleratedPairing bool            `json:"acceleratedPairing"`
-	Tiebreaks          []string        `json:"tiebreaks,omitempty"`
+	MinPlayers         int             `json:"minPlayers,omitempty"`
 	VenueName          *string         `json:"venueName,omitempty"`
+	VenueAddress       *string         `json:"venueAddress,omitempty"`
 	VenueCity          *string         `json:"venueCity,omitempty"`
+	VenueCountry       *string         `json:"venueCountry,omitempty"`
+	FIDERated          bool            `json:"fideRated"`
+	DWZRated           bool            `json:"dwzRated"`
+	OESBRated          bool            `json:"oesbRated"`
 	EntryFeeCents      int             `json:"entryFeeCents"`
+	Currency           string          `json:"currency,omitempty"`
+	Tiebreaks          []string        `json:"tiebreaks,omitempty"`
+	Settings           map[string]interface{} `json:"settings,omitempty"`
 }
 
 // UpdateTournamentRequest is the request body for updating a tournament
@@ -327,34 +337,9 @@ type UpdateTournamentRequest struct {
 
 // RegisterParticipantRequest is the request for registering a participant
 type RegisterParticipantRequest struct {
-	PlayerID  uuid.UUID `json:"playerId" binding:"required"`
-	SectionID *uuid.UUID `json:"sectionId,omitempty"`
-}
-
-// EnterResultRequest is the request for entering a game result
-type EnterResultRequest struct {
-	Result string `json:"result" binding:"required,oneof=1-0 0-1 1/2-1/2 1-0F 0-1F 0-0F BYE"`
-}
-
-// TournamentListResponse is the response for listing tournaments
-type TournamentListResponse struct {
-	Tournaments []Tournament `json:"tournaments"`
-	Total       int64        `json:"total"`
-	Page        int          `json:"page"`
-	Limit       int          `json:"limit"`
-}
-
-// StandingsResponse is the response for tournament standings
-type StandingsResponse struct {
-	Standings []Participant `json:"standings"`
-	Round     int           `json:"round"`
-}
-
-// PairingsResponse is the response for round pairings
-type PairingsResponse struct {
-	Pairings    []Game `json:"pairings"`
-	RoundNumber int    `json:"roundNumber"`
-	Status      string `json:"status"`
+	PlayerID       uuid.UUID  `json:"playerId" binding:"required"`
+	SectionID      *uuid.UUID `json:"sectionId,omitempty"`
+	StartingRating int        `json:"startingRating,omitempty"`
 }
 
 // DefaultTiebreaks returns the default tiebreak order

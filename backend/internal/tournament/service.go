@@ -54,9 +54,9 @@ func (s *Service) CreateTournament(ctx context.Context, req *CreateTournamentReq
 		VenueAddress:     req.VenueAddress,
 		VenueCity:        req.VenueCity,
 		VenueCountry:     req.VenueCountry,
-		FIDERated:        req.FIDERated,
-		DWZRated:         req.DWZRated,
-		OESBRated:        req.OESBRated,
+		FideRated:        req.FIDERated,
+		DwzRated:         req.DWZRated,
+		OesbRated:        req.OESBRated,
 		EntryFeeCents:    req.EntryFeeCents,
 		Currency:         req.Currency,
 		Status:           StatusDraft,
@@ -122,7 +122,7 @@ func (s *Service) UpdateTournament(ctx context.Context, id uuid.UUID, req *Updat
 		tournament.Name = *req.Name
 	}
 	if req.Description != nil {
-		tournament.Description = *req.Description
+		tournament.Description = req.Description
 	}
 	if req.StartDate != nil {
 		tournament.StartDate = *req.StartDate
@@ -138,9 +138,6 @@ func (s *Service) UpdateTournament(ctx context.Context, id uuid.UUID, req *Updat
 	}
 	if req.Tiebreaks != nil {
 		tournament.Tiebreaks = req.Tiebreaks
-	}
-	if req.Settings != nil {
-		tournament.Settings = req.Settings
 	}
 
 	tournament.UpdatedAt = time.Now()
@@ -168,7 +165,7 @@ func (s *Service) DeleteTournament(ctx context.Context, id uuid.UUID) error {
 }
 
 // ListTournaments lists tournaments with filters
-func (s *Service) ListTournaments(ctx context.Context, filter *TournamentFilter) ([]Tournament, int, error) {
+func (s *Service) ListTournaments(ctx context.Context, filter *ListFilters) ([]Tournament, int64, error) {
 	return s.repo.List(ctx, filter)
 }
 
@@ -209,7 +206,7 @@ func (s *Service) validateForPublish(t *Tournament) error {
 	if t.Rounds == 0 {
 		return fmt.Errorf("rounds must be specified")
 	}
-	if t.StartDate.IsZero() {
+	if t.StartDate == "" {
 		return fmt.Errorf("start date is required")
 	}
 	return nil
@@ -248,7 +245,7 @@ func (s *Service) StartTournament(ctx context.Context, id uuid.UUID) (*Tournamen
 	}
 
 	// Check minimum players
-	participants, _, err := s.repo.GetParticipants(ctx, id, &ParticipantFilter{})
+	participants, err := s.repo.ListParticipants(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +274,6 @@ func (s *Service) StartTournament(ctx context.Context, id uuid.UUID) (*Tournamen
 		TournamentID: id,
 		RoundNumber:  1,
 		Status:       RoundStatusPending,
-		CreatedAt:    time.Now(),
 	}
 
 	if err := s.repo.CreateRound(ctx, round); err != nil {
@@ -315,7 +311,7 @@ func (s *Service) RegisterParticipant(ctx context.Context, tournamentID uuid.UUI
 
 	// Check max players
 	if tournament.MaxPlayers != nil {
-		participants, _, err := s.repo.GetParticipants(ctx, tournamentID, &ParticipantFilter{})
+		participants, err := s.repo.ListParticipants(ctx, tournamentID)
 		if err != nil {
 			return nil, err
 		}
@@ -333,7 +329,7 @@ func (s *Service) RegisterParticipant(ctx context.Context, tournamentID uuid.UUI
 	}
 
 	// Check if player already registered
-	existing, _ := s.repo.GetParticipantByPlayer(ctx, tournamentID, req.PlayerID)
+	existing, _ := s.repo.GetParticipantByPlayerID(ctx, tournamentID, req.PlayerID)
 	if existing != nil {
 		return nil, fmt.Errorf("player already registered")
 	}
@@ -364,7 +360,7 @@ func (s *Service) RegisterParticipant(ctx context.Context, tournamentID uuid.UUI
 
 // WithdrawParticipant withdraws a player from a tournament
 func (s *Service) WithdrawParticipant(ctx context.Context, tournamentID, participantID uuid.UUID) error {
-	participant, err := s.repo.GetParticipantByID(ctx, participantID)
+	participant, err := s.repo.GetParticipant(ctx, participantID)
 	if err != nil {
 		return err
 	}
@@ -375,7 +371,6 @@ func (s *Service) WithdrawParticipant(ctx context.Context, tournamentID, partici
 
 	participant.RegistrationStatus = "withdrawn"
 	participant.IsActive = false
-	participant.UpdatedAt = time.Now()
 
 	if err := s.repo.UpdateParticipant(ctx, participant); err != nil {
 		return fmt.Errorf("failed to withdraw participant: %w", err)
@@ -390,13 +385,27 @@ func (s *Service) WithdrawParticipant(ctx context.Context, tournamentID, partici
 }
 
 // GetParticipants gets participants with optional filters
-func (s *Service) GetParticipants(ctx context.Context, tournamentID uuid.UUID, filter *ParticipantFilter) ([]Participant, int, error) {
-	return s.repo.GetParticipants(ctx, tournamentID, filter)
+func (s *Service) GetParticipants(ctx context.Context, tournamentID uuid.UUID, filter *ParticipantFilter) ([]Participant, error) {
+	participants, err := s.repo.ListParticipants(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+	// Apply filter in memory if needed
+	if filter != nil && filter.ActiveOnly {
+		filtered := make([]Participant, 0)
+		for _, p := range participants {
+			if p.IsActive {
+				filtered = append(filtered, p)
+			}
+		}
+		return filtered, nil
+	}
+	return participants, nil
 }
 
 // AssignStartRanks assigns start ranks based on rating
 func (s *Service) AssignStartRanks(ctx context.Context, tournamentID uuid.UUID) error {
-	participants, _, err := s.repo.GetParticipants(ctx, tournamentID, &ParticipantFilter{
+	participants, err := s.GetParticipants(ctx, tournamentID, &ParticipantFilter{
 		ActiveOnly: true,
 	})
 	if err != nil {
@@ -435,7 +444,7 @@ func (s *Service) GeneratePairings(ctx context.Context, tournamentID uuid.UUID, 
 	}
 
 	// Get the round
-	round, err := s.repo.GetRound(ctx, tournamentID, roundNumber)
+	round, err := s.repo.GetRoundByNumber(ctx, tournamentID, roundNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -454,7 +463,7 @@ func (s *Service) GeneratePairings(ctx context.Context, tournamentID uuid.UUID, 
 	req := &engine.PairingRequest{
 		TRFData:       trfData,
 		RoundNumber:   roundNumber,
-		PairingSystem: tournament.PairingSystem,
+		PairingSystem: string(tournament.PairingSystem),
 	}
 
 	result, err := s.pairingEngine.GeneratePairings(ctx, req)
@@ -463,7 +472,7 @@ func (s *Service) GeneratePairings(ctx context.Context, tournamentID uuid.UUID, 
 	}
 
 	// Convert pairings to games
-	participants, _, err := s.repo.GetParticipants(ctx, tournamentID, &ParticipantFilter{
+	participants, err := s.GetParticipants(ctx, tournamentID, &ParticipantFilter{
 		ActiveOnly: true,
 	})
 	if err != nil {
@@ -491,8 +500,8 @@ func (s *Service) GeneratePairings(ctx context.Context, tournamentID uuid.UUID, 
 			if wp, ok := rankToParticipant[p.WhiteStartNo]; ok {
 				game.WhiteParticipantID = &wp.ID
 			}
-			game.Result = "BYE"
-			game.WhiteScore = floatPtr(0.5)
+			game.Result = stringPtr("BYE")
+			game.WhiteScore = floatPtr(1.0) // Standard FIDE bye is 1 point
 			game.BlackScore = floatPtr(0)
 			game.Status = GameStatusCompleted
 		} else {
@@ -517,7 +526,8 @@ func (s *Service) GeneratePairings(ctx context.Context, tournamentID uuid.UUID, 
 	round.Status = RoundStatusPaired
 	round.PairedAt = &now
 	round.PairedBy = &userID
-	round.PairingEngineUsed = string(tournament.PairingEngine)
+	engineStr := string(tournament.PairingEngine)
+	round.PairingEngineUsed = &engineStr
 
 	if err := s.repo.UpdateRound(ctx, round); err != nil {
 		return nil, err
@@ -536,8 +546,12 @@ func floatPtr(f float64) *float64 {
 	return &f
 }
 
+func stringPtr(s string) *string {
+	return &s
+}
+
 func (s *Service) generateTRFForPairing(ctx context.Context, tournament *Tournament, roundNumber int) (string, error) {
-	participants, _, err := s.repo.GetParticipants(ctx, tournament.ID, &ParticipantFilter{
+	participants, err := s.GetParticipants(ctx, tournament.ID, &ParticipantFilter{
 		ActiveOnly: true,
 	})
 	if err != nil {
@@ -545,8 +559,14 @@ func (s *Service) generateTRFForPairing(ctx context.Context, tournament *Tournam
 	}
 
 	generator := trf.NewGenerator()
-	generator.SetTournamentInfo(tournament.Name, tournament.VenueCity, "", tournament.Rounds)
-	generator.SetDates(tournament.StartDate, time.Time{})
+	city := ""
+	if tournament.VenueCity != nil {
+		city = *tournament.VenueCity
+	}
+	generator.SetTournamentInfo(tournament.Name, city, "", tournament.Rounds)
+	// Parse StartDate string to time.Time
+	startDate, _ := time.Parse("2006-01-02", tournament.StartDate)
+	generator.SetDates(startDate, time.Time{})
 
 	for _, p := range participants {
 		player := trf.TRFPlayer{
@@ -557,13 +577,13 @@ func (s *Service) generateTRFForPairing(ctx context.Context, tournament *Tournam
 		}
 
 		// Get previous round results
-		games, err := s.repo.GetGamesByParticipant(ctx, tournament.ID, p.ID)
+		games, err := s.repo.GetPlayerGames(ctx, tournament.ID, p.ID)
 		if err != nil {
 			return "", err
 		}
 
 		for _, g := range games {
-			if g.Result == "" {
+			if g.Result == nil || *g.Result == "" {
 				continue
 			}
 
@@ -624,27 +644,27 @@ func (s *Service) generateTRFForPairing(ctx context.Context, tournament *Tournam
 
 // GetRound gets a specific round
 func (s *Service) GetRound(ctx context.Context, tournamentID uuid.UUID, roundNumber int) (*Round, error) {
-	return s.repo.GetRound(ctx, tournamentID, roundNumber)
+	return s.repo.GetRoundByNumber(ctx, tournamentID, roundNumber)
 }
 
 // GetRounds gets all rounds for a tournament
 func (s *Service) GetRounds(ctx context.Context, tournamentID uuid.UUID) ([]Round, error) {
-	return s.repo.GetRounds(ctx, tournamentID)
+	return s.repo.ListRounds(ctx, tournamentID)
 }
 
 // GetPairings gets pairings for a round
 func (s *Service) GetPairings(ctx context.Context, tournamentID uuid.UUID, roundNumber int) ([]Game, error) {
-	round, err := s.repo.GetRound(ctx, tournamentID, roundNumber)
+	round, err := s.repo.GetRoundByNumber(ctx, tournamentID, roundNumber)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.repo.GetGamesByRound(ctx, round.ID)
+	return s.repo.ListGamesByRound(ctx, round.ID)
 }
 
 // StartRound starts a round
 func (s *Service) StartRound(ctx context.Context, tournamentID uuid.UUID, roundNumber int) (*Round, error) {
-	round, err := s.repo.GetRound(ctx, tournamentID, roundNumber)
+	round, err := s.repo.GetRoundByNumber(ctx, tournamentID, roundNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -671,7 +691,7 @@ func (s *Service) EnterResult(ctx context.Context, gameID uuid.UUID, req *EnterR
 		return nil, err
 	}
 
-	if game.Status == GameStatusCompleted && game.Result != "" {
+	if game.Status == GameStatusCompleted && game.Result != nil && *game.Result != "" {
 		return nil, fmt.Errorf("result already entered")
 	}
 
@@ -682,7 +702,7 @@ func (s *Service) EnterResult(ctx context.Context, gameID uuid.UUID, req *EnterR
 	}
 
 	now := time.Now()
-	game.Result = req.Result
+	game.Result = &req.Result
 	game.WhiteScore = &whiteScore
 	game.BlackScore = &blackScore
 	game.Status = GameStatusCompleted
@@ -690,7 +710,7 @@ func (s *Service) EnterResult(ctx context.Context, gameID uuid.UUID, req *EnterR
 	game.ResultEnteredAt = &now
 
 	if req.PGN != "" {
-		game.PGN = req.PGN
+		game.PGN = &req.PGN
 	}
 
 	if err := s.repo.UpdateGame(ctx, game); err != nil {
@@ -729,7 +749,7 @@ func parseResult(result string) (float64, float64, error) {
 
 func (s *Service) updateParticipantScores(ctx context.Context, game *Game) error {
 	if game.WhiteParticipantID != nil && game.WhiteScore != nil {
-		participant, err := s.repo.GetParticipantByID(ctx, *game.WhiteParticipantID)
+		participant, err := s.repo.GetParticipant(ctx, *game.WhiteParticipantID)
 		if err != nil {
 			return err
 		}
@@ -747,7 +767,7 @@ func (s *Service) updateParticipantScores(ctx context.Context, game *Game) error
 	}
 
 	if game.BlackParticipantID != nil && game.BlackScore != nil {
-		participant, err := s.repo.GetParticipantByID(ctx, *game.BlackParticipantID)
+		participant, err := s.repo.GetParticipant(ctx, *game.BlackParticipantID)
 		if err != nil {
 			return err
 		}
@@ -774,7 +794,7 @@ func (s *Service) CompleteRound(ctx context.Context, tournamentID uuid.UUID, rou
 		return nil, err
 	}
 
-	round, err := s.repo.GetRound(ctx, tournamentID, roundNumber)
+	round, err := s.repo.GetRoundByNumber(ctx, tournamentID, roundNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -784,13 +804,13 @@ func (s *Service) CompleteRound(ctx context.Context, tournamentID uuid.UUID, rou
 	}
 
 	// Check all games have results
-	games, err := s.repo.GetGamesByRound(ctx, round.ID)
+	games, err := s.repo.ListGamesByRound(ctx, round.ID)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, g := range games {
-		if g.Result == "" {
+		if g.Result == nil || *g.Result == "" {
 			return nil, fmt.Errorf("game on board %d has no result", g.BoardNumber)
 		}
 	}
@@ -815,7 +835,6 @@ func (s *Service) CompleteRound(ctx context.Context, tournamentID uuid.UUID, rou
 			TournamentID: tournamentID,
 			RoundNumber:  roundNumber + 1,
 			Status:       RoundStatusPending,
-			CreatedAt:    time.Now(),
 		}
 
 		if err := s.repo.CreateRound(ctx, nextRound); err != nil {
@@ -854,7 +873,7 @@ func (s *Service) RecalculateTiebreaks(ctx context.Context, tournamentID uuid.UU
 		return err
 	}
 
-	participants, _, err := s.repo.GetParticipants(ctx, tournamentID, &ParticipantFilter{
+	participants, err := s.GetParticipants(ctx, tournamentID, &ParticipantFilter{
 		ActiveOnly: true,
 	})
 	if err != nil {
@@ -871,7 +890,7 @@ func (s *Service) RecalculateTiebreaks(ctx context.Context, tournamentID uuid.UU
 
 	// Build player data
 	for _, p := range participants {
-		games, err := s.repo.GetGamesByParticipant(ctx, tournamentID, p.ID)
+		games, err := s.repo.GetPlayerGames(ctx, tournamentID, p.ID)
 		if err != nil {
 			continue
 		}
@@ -888,7 +907,7 @@ func (s *Service) RecalculateTiebreaks(ctx context.Context, tournamentID uuid.UU
 
 		// Build results
 		for _, g := range games {
-			if g.Result == "" {
+			if g.Result == nil || *g.Result == "" {
 				continue
 			}
 
@@ -1000,14 +1019,14 @@ func (s *Service) GetCrosstable(ctx context.Context, tournamentID uuid.UUID) (*C
 		}
 
 		// Get all games for this participant
-		games, err := s.repo.GetGamesByParticipant(ctx, tournamentID, p.ID)
+		games, err := s.repo.GetPlayerGames(ctx, tournamentID, p.ID)
 		if err != nil {
 			continue
 		}
 
 		for _, g := range games {
 			// Determine round number from game
-			round, _ := s.repo.GetRoundByID(ctx, g.RoundID)
+			round, _ := s.repo.GetRound(ctx, g.RoundID)
 			if round == nil {
 				continue
 			}
@@ -1085,14 +1104,24 @@ func (s *Service) ExportTRF(ctx context.Context, tournamentID uuid.UUID) (string
 		return "", err
 	}
 
-	participants, _, err := s.repo.GetParticipants(ctx, tournamentID, &ParticipantFilter{})
+	participants, err := s.GetParticipants(ctx, tournamentID, &ParticipantFilter{})
 	if err != nil {
 		return "", err
 	}
 
 	generator := trf.NewGenerator()
-	generator.SetTournamentInfo(tournament.Name, tournament.VenueCity, "", tournament.Rounds)
-	generator.SetDates(tournament.StartDate, *tournament.EndDate)
+	city := ""
+	if tournament.VenueCity != nil {
+		city = *tournament.VenueCity
+	}
+	generator.SetTournamentInfo(tournament.Name, city, "", tournament.Rounds)
+	// Parse dates from strings
+	startDate, _ := time.Parse("2006-01-02", tournament.StartDate)
+	var endDate time.Time
+	if tournament.EndDate != nil {
+		endDate, _ = time.Parse("2006-01-02", *tournament.EndDate)
+	}
+	generator.SetDates(startDate, endDate)
 	generator.SetTimeControl(tournament.TimeControl)
 
 	switch tournament.Type {
@@ -1111,13 +1140,13 @@ func (s *Service) ExportTRF(ctx context.Context, tournamentID uuid.UUID) (string
 		}
 
 		// Get all games
-		games, err := s.repo.GetGamesByParticipant(ctx, tournamentID, p.ID)
+		games, err := s.repo.GetPlayerGames(ctx, tournamentID, p.ID)
 		if err != nil {
 			continue
 		}
 
 		for _, g := range games {
-			round, _ := s.repo.GetRoundByID(ctx, g.RoundID)
+			round, _ := s.repo.GetRound(ctx, g.RoundID)
 			if round == nil {
 				continue
 			}
@@ -1196,5 +1225,5 @@ func (s *Service) RemoveForbiddenPair(ctx context.Context, id uuid.UUID) error {
 
 // GetForbiddenPairs gets all forbidden pairs for a tournament
 func (s *Service) GetForbiddenPairs(ctx context.Context, tournamentID uuid.UUID) ([]ForbiddenPair, error) {
-	return s.repo.GetForbiddenPairs(ctx, tournamentID)
+	return s.repo.ListForbiddenPairs(ctx, tournamentID)
 }

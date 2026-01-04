@@ -63,7 +63,10 @@ func (h *Handler) GetTournamentStatus(c *gin.Context) {
 		return
 	}
 
-	status, err := h.service.GetTournamentStatus(c.Request.Context(), id)
+	userID, _ := c.Get("user_id")
+	arbiterID, _ := userID.(uuid.UUID)
+
+	status, err := h.service.GetTournamentStatus(c.Request.Context(), id, arbiterID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to get tournament status")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -88,6 +91,9 @@ func (h *Handler) GetAuditLog(c *gin.Context) {
 		return
 	}
 
+	userID, _ := c.Get("user_id")
+	arbiterID, _ := userID.(uuid.UUID)
+
 	limit := 100
 	if l := c.Query("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
@@ -95,7 +101,7 @@ func (h *Handler) GetAuditLog(c *gin.Context) {
 		}
 	}
 
-	log, err := h.service.GetAuditLog(c.Request.Context(), id, limit)
+	log, err := h.service.GetAuditLog(c.Request.Context(), id, arbiterID, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

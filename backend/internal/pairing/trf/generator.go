@@ -209,10 +209,12 @@ func (g *Generator) generatePlayerLine(player TRFPlayer) string {
 
 // generateRoundResult generates the round result portion
 func (g *Generator) generateRoundResult(result TRFRoundResult) string {
-	// Format: "  c r opp" (8 chars total)
-	// c = color (w/b/-)
-	// r = result (1/0/=/+/-/H/F/U/Z)
-	// opp = opponent number (4 digits)
+	// Format: "  c r ooo" (8 chars total)
+	// Position 0-1: padding spaces
+	// Position 2: color (w/b/-)
+	// Position 3: space
+	// Position 4: result (1/0/=/+/-/H/F/U/Z)
+	// Position 5-7: opponent number (3 digits, right-justified)
 
 	color := result.Color
 	if color == "" {
@@ -225,13 +227,13 @@ func (g *Generator) generateRoundResult(result TRFRoundResult) string {
 	}
 
 	if result.OpponentNo > 0 {
-		return fmt.Sprintf("  %s %s%4d", color, resultChar, result.OpponentNo)
+		return fmt.Sprintf("  %s %s%3d", color, resultChar, result.OpponentNo)
 	} else if result.Result == "H" || result.Result == "Z" {
 		// Bye
-		return fmt.Sprintf("  - %s    ", resultChar)
+		return fmt.Sprintf("  - %s   ", resultChar)
 	} else {
 		// Unpaired
-		return fmt.Sprintf("  - U    ")
+		return fmt.Sprintf("  - U   ")
 	}
 }
 
