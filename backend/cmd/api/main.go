@@ -36,6 +36,7 @@ import (
 	"github.com/openpairing/openpairing/internal/tournament"
 	"github.com/openpairing/openpairing/internal/user"
 	"github.com/openpairing/openpairing/internal/waitlist"
+	"github.com/openpairing/openpairing/internal/wam"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -217,6 +218,11 @@ func main() {
 	waitlistService := waitlist.NewService(waitlistRepo, emailService, cfg.App.BaseURL, log.Logger)
 	waitlistHandler := waitlist.NewHandler(waitlistService, log.Logger)
 
+	// WAM (Württembergische Amateurmeisterschaft) service
+	wamRepo := wam.NewRepository(db.Pool)
+	wamService := wam.NewService(wamRepo, log.Logger)
+	wamHandler := wam.NewHandler(wamService, log.Logger)
+
 	// Configure rate limiting
 	middleware.RateLimitEnabled = cfg.RateLimit.Enabled
 	if !cfg.RateLimit.Enabled {
@@ -224,7 +230,7 @@ func main() {
 	}
 
 	// Create Gin router
-	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler, exportHandler, standingsHandler, resultHandler, organizationHandler, teamHandler, userHandler, gameActionHandler, fairplayHandler, teamTournamentHandler, waitlistHandler)
+	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler, exportHandler, standingsHandler, resultHandler, organizationHandler, teamHandler, userHandler, gameActionHandler, fairplayHandler, teamTournamentHandler, waitlistHandler, wamHandler)
 
 	// Create server
 	srv := &http.Server{
@@ -278,7 +284,7 @@ func main() {
 	log.Info().Msg("Server exited")
 }
 
-func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler, reportsHandler *reports.Handler, exportHandler *export.Handler, standingsHandler *standings.Handler, resultHandler *result.Handler, organizationHandler *organization.Handler, teamHandler *team.Handler, userHandler *user.Handler, gameActionHandler *gameaction.Handler, fairplayHandler *fairplay.Handler, teamTournamentHandler *team_tournament.Handler, waitlistHandler *waitlist.Handler) *gin.Engine {
+func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler, reportsHandler *reports.Handler, exportHandler *export.Handler, standingsHandler *standings.Handler, resultHandler *result.Handler, organizationHandler *organization.Handler, teamHandler *team.Handler, userHandler *user.Handler, gameActionHandler *gameaction.Handler, fairplayHandler *fairplay.Handler, teamTournamentHandler *team_tournament.Handler, waitlistHandler *waitlist.Handler, wamHandler *wam.Handler) *gin.Engine {
 	// Set Gin mode
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -356,6 +362,9 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 
 		// Waitlist routes
 		waitlistHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireOrganizer())
+
+		// WAM (Württembergische Amateurmeisterschaft) routes
+		wamHandler.RegisterRoutes(v1, authMiddleware.Authenticate())
 
 		// Online games
 		games := v1.Group("/games")
