@@ -488,6 +488,151 @@ export const federationApi = {
   },
 };
 
+// Reports API types
+export interface DWZPlayer {
+  startNumber: number;
+  pkz: string;
+  name: string;
+  firstName: string;
+  lastName: string;
+  clubId: string;
+  clubName: string;
+  dwz: number;
+  dwzIndex: number;
+  fideId: string;
+  fideRating: number;
+  birthYear: number;
+  gender: string;
+  score: number;
+  rank: number;
+}
+
+export interface DWZTournament {
+  turnierCode: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  city: string;
+  organizer: string;
+  chiefArbiter: string;
+  timeControl: string;
+  rounds: number;
+  pairingSystem: string;
+}
+
+export interface DWZReportData {
+  tournament: DWZTournament;
+  players: DWZPlayer[];
+  generatedAt: string;
+}
+
+export interface DWZReportResponse {
+  report: DWZReportData;
+  validationErrors: string[];
+  isValid: boolean;
+}
+
+export interface TRFPlayer {
+  startNo: number;
+  gender: string;
+  title: string;
+  name: string;
+  fideRating: number;
+  federation: string;
+  fideId: string;
+  birthDate: string;
+  points: number;
+  rank: number;
+  roundResults: {
+    opponentNo: number;
+    color: string;
+    result: string;
+  }[];
+}
+
+export interface TRFReportData {
+  tournamentId: string;
+  tournamentName: string;
+  tournamentCode: string;
+  city: string;
+  federation: string;
+  startDate: string;
+  endDate: string;
+  numPlayers: number;
+  numRatedPlayers: number;
+  numRounds: number;
+  ratingType: string;
+  chiefArbiter: string;
+  deputyArbiter: string;
+  timeControl: string;
+  players: TRFPlayer[];
+}
+
+export interface TRFReportResponse {
+  report: TRFReportData;
+  validationErrors: string[];
+  isValid: boolean;
+}
+
+export interface NormGameDetail {
+  round: number;
+  opponentName: string;
+  opponentFideId: string;
+  opponentRating: number;
+  opponentTitle: string;
+  opponentFed: string;
+  color: string;
+  result: number;
+  ratingDiff: number;
+  expectedScore: number;
+}
+
+export interface NormResult {
+  playerId: string;
+  playerName: string;
+  playerFideId: string;
+  playerRating: number;
+  playerFederation: string;
+  normType: string;
+  achieved: boolean;
+  performance: number;
+  gamesPlayed: number;
+  score: number;
+  opponentCount: number;
+  federationCount: number;
+  titledOppCount: number;
+  foreignOppCount: number;
+  averageOppRating: number;
+  details: NormGameDetail[];
+  missingReasons: string[];
+}
+
+export interface NormReportData {
+  tournamentId: string;
+  tournamentName: string;
+  generatedAt: string;
+  normResults: NormResult[];
+}
+
+export interface NormReportResponse {
+  report: NormReportData;
+  summary: {
+    achieved: number;
+    nearMiss: number;
+    total: number;
+  };
+}
+
+// Reports API
+export const reportsApi = {
+  getDWZReport: (tournamentId: string) =>
+    api.get<DWZReportResponse>(`/reports/dwz/${tournamentId}`),
+  getTRFReport: (tournamentId: string) =>
+    api.get<TRFReportResponse>(`/reports/trf/${tournamentId}`),
+  getNormReport: (tournamentId: string) =>
+    api.get<NormReportResponse>(`/reports/norms/${tournamentId}`),
+};
+
 export const wamApi = {
   // Get WAM tournament status and groups
   getStatus: (tournamentId: string) =>

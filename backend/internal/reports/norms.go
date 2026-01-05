@@ -103,37 +103,37 @@ var NormRequirementsTable = map[NormType]NormRequirements{
 
 // NormResult contains the result of a norm calculation
 type NormResult struct {
-	PlayerID        uuid.UUID
-	PlayerName      string
-	PlayerFideID    string
-	PlayerRating    int
-	PlayerFederation string
-	NormType        NormType
-	Achieved        bool
-	Performance     int
-	GamesPlayed     int
-	Score           float64
-	OpponentCount   int
-	FederationCount int
-	TitledOppCount  int
-	ForeignOppCount int
-	AverageOppRating int
-	Details         []NormGameDetail
-	MissingReasons  []string
+	PlayerID         uuid.UUID        `json:"playerId"`
+	PlayerName       string           `json:"playerName"`
+	PlayerFideID     string           `json:"playerFideId"`
+	PlayerRating     int              `json:"playerRating"`
+	PlayerFederation string           `json:"playerFederation"`
+	NormType         NormType         `json:"normType"`
+	Achieved         bool             `json:"achieved"`
+	Performance      int              `json:"performance"`
+	GamesPlayed      int              `json:"gamesPlayed"`
+	Score            float64          `json:"score"`
+	OpponentCount    int              `json:"opponentCount"`
+	FederationCount  int              `json:"federationCount"`
+	TitledOppCount   int              `json:"titledOppCount"`
+	ForeignOppCount  int              `json:"foreignOppCount"`
+	AverageOppRating int              `json:"averageOppRating"`
+	Details          []NormGameDetail `json:"details"`
+	MissingReasons   []string         `json:"missingReasons"`
 }
 
 // NormGameDetail contains details of a single game for norm calculation
 type NormGameDetail struct {
-	Round           int
-	OpponentName    string
-	OpponentFideID  string
-	OpponentRating  int
-	OpponentTitle   string
-	OpponentFed     string
-	Color           string
-	Result          float64
-	RatingDiff      int
-	ExpectedScore   float64
+	Round          int     `json:"round"`
+	OpponentName   string  `json:"opponentName"`
+	OpponentFideID string  `json:"opponentFideId"`
+	OpponentRating int     `json:"opponentRating"`
+	OpponentTitle  string  `json:"opponentTitle"`
+	OpponentFed    string  `json:"opponentFed"`
+	Color          string  `json:"color"`
+	Result         float64 `json:"result"`
+	RatingDiff     int     `json:"ratingDiff"`
+	ExpectedScore  float64 `json:"expectedScore"`
 }
 
 // NormCalculator calculates FIDE title norms
@@ -336,10 +336,10 @@ func isTitled(title string) bool {
 
 // NormReport contains all norm results for a tournament
 type NormReport struct {
-	TournamentID   uuid.UUID
-	TournamentName string
-	GeneratedAt    time.Time
-	NormResults    []NormResult
+	TournamentID   uuid.UUID    `json:"tournamentId"`
+	TournamentName string       `json:"tournamentName"`
+	GeneratedAt    time.Time    `json:"generatedAt"`
+	NormResults    []NormResult `json:"normResults"`
 }
 
 // NormReportService generates norm reports

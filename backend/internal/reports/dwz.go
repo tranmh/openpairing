@@ -12,65 +12,65 @@ import (
 
 // DWZReport generates reports in DWZ format for German Chess Federation submission
 type DWZReport struct {
-	Tournament     DWZTournamentInfo
-	Players        []DWZPlayerRecord
-	Games          []DWZGameRecord
-	GeneratedAt    time.Time
+	Tournament  DWZTournamentInfo   `json:"tournament"`
+	Players     []DWZPlayerRecord   `json:"players"`
+	Games       []DWZGameRecord     `json:"games,omitempty"`
+	GeneratedAt time.Time           `json:"generatedAt"`
 }
 
 // DWZTournamentInfo contains tournament metadata for DWZ report
 type DWZTournamentInfo struct {
-	TurnierCode     string    // Tournament code assigned by federation
-	Name            string
-	StartDate       time.Time
-	EndDate         time.Time
-	City            string
-	Organizer       string
-	ChiefArbiter    string
-	TimeControl     string
-	Rounds          int
-	PairingSystem   string // Swiss, Round Robin, etc.
-	RatingType      string // Standard, Rapid, Blitz
+	TurnierCode   string    `json:"turnierCode"`   // Tournament code assigned by federation
+	Name          string    `json:"name"`
+	StartDate     time.Time `json:"startDate"`
+	EndDate       time.Time `json:"endDate"`
+	City          string    `json:"city"`
+	Organizer     string    `json:"organizer"`
+	ChiefArbiter  string    `json:"chiefArbiter"`
+	TimeControl   string    `json:"timeControl"`
+	Rounds        int       `json:"rounds"`
+	PairingSystem string    `json:"pairingSystem"` // Swiss, Round Robin, etc.
+	RatingType    string    `json:"ratingType"`    // Standard, Rapid, Blitz
 }
 
 // DWZPlayerRecord contains player data for DWZ report
 type DWZPlayerRecord struct {
-	StartNumber   int
-	PKZ           string // Personenkennziffer (DSB ID)
-	Name          string
-	FirstName     string
-	LastName      string
-	ClubID        string // ZPS number
-	ClubName      string
-	DWZ           int
-	DWZIndex      int
-	FideID        string
-	FideRating    int
-	BirthYear     int
-	Gender        string
-	Score         float64
-	Rank          int
-	Rounds        []DWZRoundResult
+	StartNumber int             `json:"startNumber"`
+	PKZ         string          `json:"pkz"`       // Personenkennziffer (DSB ID)
+	Name        string          `json:"name"`
+	FirstName   string          `json:"firstName"`
+	LastName    string          `json:"lastName"`
+	ClubID      string          `json:"clubId"`    // ZPS number
+	ClubName    string          `json:"clubName"`
+	DWZ         int             `json:"dwz"`
+	DWZIndex    int             `json:"dwzIndex"`
+	FideID      string          `json:"fideId"`
+	FideRating  int             `json:"fideRating"`
+	BirthYear   int             `json:"birthYear"`
+	Gender      string          `json:"gender"`
+	Score       float64         `json:"score"`
+	Rank        int             `json:"rank"`
+	Rounds      []DWZRoundResult `json:"rounds,omitempty"`
 }
 
 // DWZRoundResult contains a single round result
 type DWZRoundResult struct {
-	Round        int
-	OpponentNum  int    // 0 for bye/forfeit
-	Color        string // w, b, or empty
-	Result       string // 1, 0, =, +, -, etc.
+	Round       int    `json:"round"`
+	OpponentNum int    `json:"opponentNum"` // 0 for bye/forfeit
+	Color       string `json:"color"`       // w, b, or empty
+	Result      string `json:"result"`      // 1, 0, =, +, -, etc.
 }
 
 // DWZGameRecord represents a single game for DWZ submission
 type DWZGameRecord struct {
-	Round       int
-	WhitePKZ    string
-	WhiteName   string
-	WhiteDWZ    int
-	BlackPKZ    string
-	BlackName   string
-	BlackDWZ    int
-	Result      string // 1-0, 0-1, 1/2-1/2, +/-, -/+, etc.
+	Round     int    `json:"round"`
+	WhitePKZ  string `json:"whitePkz"`
+	WhiteName string `json:"whiteName"`
+	WhiteDWZ  int    `json:"whiteDwz"`
+	BlackPKZ  string `json:"blackPkz"`
+	BlackName string `json:"blackName"`
+	BlackDWZ  int    `json:"blackDwz"`
+	Result    string `json:"result"` // 1-0, 0-1, 1/2-1/2, +/-, -/+, etc.
 }
 
 // DWZGenerator generates DWZ format reports

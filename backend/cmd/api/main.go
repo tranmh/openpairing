@@ -365,8 +365,8 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 		// Arbiter routes
 		arbiterHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireArbiter())
 
-		// Reports routes
-		reportsHandler.RegisterRoutes(v1)
+		// Reports routes (require arbiter)
+		reportsHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireArbiter())
 
 		// Organization routes
 		organizationHandler.RegisterRoutes(v1, authMiddleware.Authenticate())

@@ -40,12 +40,14 @@ import {
   Edit,
   CheckCircle,
   CircleDot,
+  FileText,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { WamGroupsTab, WamParticipantsTab } from '@/components/wam';
 import { SeatingView } from '@/components/tournament/SeatingView';
 import { RoundRobinSettingsForm } from '@/components/tournament/RoundRobinSettingsForm';
+import { ReportsTab } from '@/components/tournament/ReportsTab';
 
 interface Tournament {
   id: string;
@@ -373,6 +375,10 @@ export default function TournamentDetailPage() {
               Sitzplan
             </TabsTrigger>
           )}
+          <TabsTrigger value="reports">
+            <FileText className="mr-1 h-4 w-4" />
+            Berichte
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
@@ -513,6 +519,10 @@ export default function TournamentDetailPage() {
             </div>
           </TabsContent>
         )}
+
+        <TabsContent value="reports">
+          <ReportsTab tournamentId={tournamentId} />
+        </TabsContent>
       </Tabs>
     </div>
   );

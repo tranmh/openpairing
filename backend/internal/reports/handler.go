@@ -30,21 +30,30 @@ func NewHandler(dwzService *DWZReportService, normService *NormReportService, tr
 }
 
 // RegisterRoutes registers the report routes
-func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
+func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerFunc, arbiterMiddleware gin.HandlerFunc) {
 	reports := r.Group("/reports")
+
+	// Protected routes - require arbiter auth for viewing report data
+	protected := reports.Group("")
+	protected.Use(authMiddleware)
+	protected.Use(arbiterMiddleware)
 	{
-		// DWZ reports
-		reports.GET("/dwz/:tournamentId", h.GetDWZReport)
+		// DWZ reports - JSON data
+		protected.GET("/dwz/:tournamentId", h.GetDWZReport)
+
+		// TRF reports - JSON data
+		protected.GET("/trf/:tournamentId", h.GetTRFReport)
+
+		// Norm reports - JSON data
+		protected.GET("/norms/:tournamentId", h.GetNormReport)
+		protected.GET("/norms/:tournamentId/player/:playerId", h.GetPlayerNormStatus)
+	}
+
+	// Public download routes - file downloads (same as other exports)
+	{
 		reports.GET("/dwz/:tournamentId/csv", h.DownloadDWZCSV)
 		reports.GET("/dwz/:tournamentId/xml", h.DownloadDWZXML)
-
-		// TRF reports
-		reports.GET("/trf/:tournamentId", h.GetTRFReport)
 		reports.GET("/trf/:tournamentId/download", h.DownloadTRF)
-
-		// Norm reports
-		reports.GET("/norms/:tournamentId", h.GetNormReport)
-		reports.GET("/norms/:tournamentId/player/:playerId", h.GetPlayerNormStatus)
 	}
 }
 
@@ -314,44 +323,44 @@ func sanitizeFilename(name string) string {
 
 // TRFReport represents a FIDE Tournament Report Format report
 type TRFReport struct {
-	TournamentID     uuid.UUID
-	TournamentName   string
-	TournamentCode   string
-	City             string
-	Federation       string
-	StartDate        string
-	EndDate          string
-	NumPlayers       int
-	NumRatedPlayers  int
-	NumRounds        int
-	RatingType       string
-	ChiefArbiter     string
-	DeputyArbiter    string
-	TimeControl      string
-	Players          []TRFPlayer
-	dataProvider     TournamentDataProvider
+	TournamentID    uuid.UUID  `json:"tournamentId"`
+	TournamentName  string     `json:"tournamentName"`
+	TournamentCode  string     `json:"tournamentCode"`
+	City            string     `json:"city"`
+	Federation      string     `json:"federation"`
+	StartDate       string     `json:"startDate"`
+	EndDate         string     `json:"endDate"`
+	NumPlayers      int        `json:"numPlayers"`
+	NumRatedPlayers int        `json:"numRatedPlayers"`
+	NumRounds       int        `json:"numRounds"`
+	RatingType      string     `json:"ratingType"`
+	ChiefArbiter    string     `json:"chiefArbiter"`
+	DeputyArbiter   string     `json:"deputyArbiter"`
+	TimeControl     string     `json:"timeControl"`
+	Players         []TRFPlayer `json:"players"`
+	dataProvider    TournamentDataProvider `json:"-"`
 }
 
 // TRFPlayer represents a player in TRF format
 type TRFPlayer struct {
-	StartNo      int
-	Gender       string
-	Title        string
-	Name         string
-	FIDERating   int
-	Federation   string
-	FIDEID       string
-	BirthDate    string
-	Points       float64
-	Rank         int
-	RoundResults []TRFRound
+	StartNo      int        `json:"startNo"`
+	Gender       string     `json:"gender"`
+	Title        string     `json:"title"`
+	Name         string     `json:"name"`
+	FIDERating   int        `json:"fideRating"`
+	Federation   string     `json:"federation"`
+	FIDEID       string     `json:"fideId"`
+	BirthDate    string     `json:"birthDate"`
+	Points       float64    `json:"points"`
+	Rank         int        `json:"rank"`
+	RoundResults []TRFRound `json:"roundResults"`
 }
 
 // TRFRound represents a single round result in TRF format
 type TRFRound struct {
-	OpponentNo int
-	Color      string // w, b, or -
-	Result     string // 1, 0, =, +, -, etc.
+	OpponentNo int    `json:"opponentNo"`
+	Color      string `json:"color"`  // w, b, or -
+	Result     string `json:"result"` // 1, 0, =, +, -, etc.
 }
 
 // TRFReportService generates TRF reports
