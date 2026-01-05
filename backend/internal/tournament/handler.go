@@ -25,7 +25,7 @@ func NewHandler(service *Service, logger zerolog.Logger) *Handler {
 }
 
 // RegisterRoutes registers tournament routes
-func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerFunc) {
+func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerFunc, organizerMiddleware gin.HandlerFunc) {
 	tournaments := r.Group("/tournaments")
 	{
 		// Public routes
@@ -38,36 +38,43 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 		tournaments.GET("/:id/rounds/:round/pairings", h.GetPairings)
 		tournaments.GET("/:id/export/trf", h.ExportTRF)
 
-		// Protected routes
+		// Protected routes (authenticated users)
 		protected := tournaments.Group("")
 		protected.Use(authMiddleware)
 		{
-			protected.POST("", h.CreateTournament)
-			protected.PUT("/:id", h.UpdateTournament)
-			protected.DELETE("/:id", h.DeleteTournament)
-			protected.POST("/:id/publish", h.PublishTournament)
-			protected.POST("/:id/start-registration", h.StartRegistration)
-			protected.POST("/:id/start", h.StartTournament)
-
-			// Participants
+			// Participants - any authenticated user can register
 			protected.GET("/:id/participants", h.GetParticipants)
 			protected.POST("/:id/participants", h.RegisterParticipant)
-			protected.DELETE("/:id/participants/:participantId", h.WithdrawParticipant)
-			protected.POST("/:id/assign-ranks", h.AssignStartRanks)
+		}
 
-			// Rounds & Pairings
-			protected.POST("/:id/rounds/:round/pair", h.GeneratePairings)
-			protected.POST("/:id/rounds/:round/start", h.StartRound)
-			protected.POST("/:id/rounds/:round/complete", h.CompleteRound)
+		// Organizer-only routes (organizer and admin roles)
+		organizer := tournaments.Group("")
+		organizer.Use(authMiddleware, organizerMiddleware)
+		{
+			organizer.POST("", h.CreateTournament)
+			organizer.PUT("/:id", h.UpdateTournament)
+			organizer.DELETE("/:id", h.DeleteTournament)
+			organizer.POST("/:id/publish", h.PublishTournament)
+			organizer.POST("/:id/start-registration", h.StartRegistration)
+			organizer.POST("/:id/start", h.StartTournament)
 
-			// Games & Results
-			protected.GET("/:id/games/:gameId", h.GetGame)
-			protected.PUT("/:id/games/:gameId/result", h.EnterResult)
+			// Participant management (organizer only)
+			organizer.DELETE("/:id/participants/:participantId", h.WithdrawParticipant)
+			organizer.POST("/:id/assign-ranks", h.AssignStartRanks)
 
-			// Forbidden Pairs
-			protected.GET("/:id/forbidden-pairs", h.GetForbiddenPairs)
-			protected.POST("/:id/forbidden-pairs", h.AddForbiddenPair)
-			protected.DELETE("/:id/forbidden-pairs/:pairId", h.RemoveForbiddenPair)
+			// Rounds & Pairings (organizer only)
+			organizer.POST("/:id/rounds/:round/pair", h.GeneratePairings)
+			organizer.POST("/:id/rounds/:round/start", h.StartRound)
+			organizer.POST("/:id/rounds/:round/complete", h.CompleteRound)
+
+			// Games & Results (organizer only)
+			organizer.GET("/:id/games/:gameId", h.GetGame)
+			organizer.PUT("/:id/games/:gameId/result", h.EnterResult)
+
+			// Forbidden Pairs (organizer only)
+			organizer.GET("/:id/forbidden-pairs", h.GetForbiddenPairs)
+			organizer.POST("/:id/forbidden-pairs", h.AddForbiddenPair)
+			organizer.DELETE("/:id/forbidden-pairs/:pairId", h.RemoveForbiddenPair)
 		}
 	}
 }

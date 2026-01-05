@@ -255,7 +255,7 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 		notificationHandler.RegisterRoutes(v1)
 
 		// Tournament routes - use the tournament handler's RegisterRoutes
-		tournamentHandler.RegisterRoutes(v1, authMiddleware.Authenticate())
+		tournamentHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireOrganizer())
 
 		// Arbiter routes
 		arbiterHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireArbiter())
