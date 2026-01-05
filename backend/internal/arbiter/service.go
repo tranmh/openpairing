@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/openpairing/openpairing/internal/player"
 	"github.com/openpairing/openpairing/internal/tournament"
 	"github.com/rs/zerolog"
 )
@@ -20,14 +21,16 @@ type ArbiterAssignment struct {
 // Service provides arbiter-specific business logic
 type Service struct {
 	tournamentRepo tournament.Repository
+	playerRepo     player.Repository
 	repo           *Repository
 	logger         zerolog.Logger
 }
 
 // NewService creates a new arbiter service
-func NewService(tournamentRepo tournament.Repository, repo *Repository, logger zerolog.Logger) *Service {
+func NewService(tournamentRepo tournament.Repository, playerRepo player.Repository, repo *Repository, logger zerolog.Logger) *Service {
 	return &Service{
 		tournamentRepo: tournamentRepo,
+		playerRepo:     playerRepo,
 		repo:           repo,
 		logger:         logger.With().Str("service", "arbiter").Logger(),
 	}
@@ -148,6 +151,34 @@ func (s *Service) GetTournamentStatus(ctx context.Context, tournamentID uuid.UUI
 	// Calculate statistics
 	stats := s.calculateStatistics(participants, rounds)
 
+	// Build player name map from participants
+	playerNameMap := make(map[uuid.UUID]string)
+	if s.playerRepo != nil {
+		// Collect unique player IDs
+		playerIDs := make([]uuid.UUID, 0, len(participants))
+		for i := range participants {
+			playerIDs = append(playerIDs, participants[i].PlayerID)
+		}
+
+		// Fetch players
+		if len(playerIDs) > 0 {
+			players, err := s.playerRepo.GetByIDs(ctx, playerIDs)
+			if err == nil {
+				for i := range players {
+					playerNameMap[players[i].ID] = players[i].FirstName + " " + players[i].LastName
+				}
+			}
+		}
+	}
+
+	// Build participant -> player name map
+	participantNameMap := make(map[uuid.UUID]string)
+	for i := range participants {
+		if name, ok := playerNameMap[participants[i].PlayerID]; ok {
+			participantNameMap[participants[i].ID] = name
+		}
+	}
+
 	// Get active games if round is ongoing
 	var activeGames []GameStatus
 	var pendingResults int
@@ -170,6 +201,7 @@ func (s *Service) GetTournamentStatus(ctx context.Context, tournamentID uuid.UUI
 						if p, ok := participantMap[*games[i].WhiteParticipantID]; ok {
 							gs.WhitePlayer = &PlayerInfo{
 								ParticipantID: p.ID,
+								Name:          participantNameMap[p.ID],
 								Rating:        p.StartingRating,
 								Points:        p.Points,
 							}
@@ -180,6 +212,7 @@ func (s *Service) GetTournamentStatus(ctx context.Context, tournamentID uuid.UUI
 						if p, ok := participantMap[*games[i].BlackParticipantID]; ok {
 							gs.BlackPlayer = &PlayerInfo{
 								ParticipantID: p.ID,
+								Name:          participantNameMap[p.ID],
 								Rating:        p.StartingRating,
 								Points:        p.Points,
 							}

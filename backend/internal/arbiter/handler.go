@@ -6,23 +6,26 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/openpairing/openpairing/internal/tournament"
 	"github.com/rs/zerolog"
 )
 
 // Handler handles arbiter HTTP requests
 type Handler struct {
-	service    *Service
-	monitorHub *MonitorHub
-	logger     zerolog.Logger
+	service           *Service
+	tournamentService *tournament.Service
+	monitorHub        *MonitorHub
+	logger            zerolog.Logger
 }
 
 // NewHandler creates a new arbiter handler
-func NewHandler(service *Service, logger zerolog.Logger) *Handler {
+func NewHandler(service *Service, tournamentService *tournament.Service, logger zerolog.Logger) *Handler {
 	hub := NewMonitorHub(service, logger)
 	return &Handler{
-		service:    service,
-		monitorHub: hub,
-		logger:     logger.With().Str("handler", "arbiter").Logger(),
+		service:           service,
+		tournamentService: tournamentService,
+		monitorHub:        hub,
+		logger:            logger.With().Str("handler", "arbiter").Logger(),
 	}
 }
 
@@ -57,6 +60,11 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 		arbiter.POST("/tournaments/:id/change-color", h.ChangeColor)
 		arbiter.POST("/tournaments/:id/create-pairing", h.CreateManualPairing)
 		arbiter.DELETE("/tournaments/:id/pairings/:gameId", h.DeletePairing)
+
+		// Round Control
+		arbiter.POST("/tournaments/:id/rounds/:round/pair", h.GeneratePairings)
+		arbiter.POST("/tournaments/:id/rounds/:round/start", h.StartRound)
+		arbiter.POST("/tournaments/:id/rounds/:round/complete", h.CompleteRound)
 
 		// Announcements
 		arbiter.POST("/tournaments/:id/announcements", h.CreateAnnouncement)
@@ -440,6 +448,123 @@ func (h *Handler) CreateAnnouncement(c *gin.Context) {
 	c.JSON(http.StatusCreated, AnnouncementResponse{Announcement: announcement})
 }
 
+// GeneratePairings generates pairings for a round
+// @Summary Generate pairings
+// @Tags arbiter
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param round path int true "Round number"
+// @Success 200 {object} PairingsResponse
+// @Router /arbiter/tournaments/{id}/rounds/{round}/pair [post]
+func (h *Handler) GeneratePairings(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	round, err := strconv.Atoi(c.Param("round"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid round number"})
+		return
+	}
+
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
+
+	// Verify arbiter has permission
+	if err := h.service.canManageTournament(c.Request.Context(), id, arbiterID); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+
+	games, err := h.tournamentService.GeneratePairings(c.Request.Context(), id, round, arbiterID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, PairingsResponse{Games: games})
+}
+
+// StartRound starts a round
+// @Summary Start round
+// @Tags arbiter
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param round path int true "Round number"
+// @Success 200 {object} RoundResponse
+// @Router /arbiter/tournaments/{id}/rounds/{round}/start [post]
+func (h *Handler) StartRound(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	round, err := strconv.Atoi(c.Param("round"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid round number"})
+		return
+	}
+
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
+
+	// Verify arbiter has permission
+	if err := h.service.canManageTournament(c.Request.Context(), id, arbiterID); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+
+	roundData, err := h.tournamentService.StartRound(c.Request.Context(), id, round)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, RoundResponse{Round: roundData})
+}
+
+// CompleteRound completes a round
+// @Summary Complete round
+// @Tags arbiter
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param round path int true "Round number"
+// @Success 200 {object} RoundResponse
+// @Router /arbiter/tournaments/{id}/rounds/{round}/complete [post]
+func (h *Handler) CompleteRound(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	round, err := strconv.Atoi(c.Param("round"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid round number"})
+		return
+	}
+
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
+
+	// Verify arbiter has permission
+	if err := h.service.canManageTournament(c.Request.Context(), id, arbiterID); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+
+	roundData, err := h.tournamentService.CompleteRound(c.Request.Context(), id, round)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, RoundResponse{Round: roundData})
+}
+
 // Response types
 
 // TournamentStatusResponse wraps tournament status
@@ -455,4 +580,14 @@ type AuditLogResponse struct {
 // AnnouncementResponse wraps an announcement
 type AnnouncementResponse struct {
 	Announcement *Announcement `json:"announcement"`
+}
+
+// PairingsResponse wraps pairings
+type PairingsResponse struct {
+	Games []tournament.Game `json:"games"`
+}
+
+// RoundResponse wraps a round
+type RoundResponse struct {
+	Round *tournament.Round `json:"round"`
 }

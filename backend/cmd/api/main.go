@@ -172,8 +172,8 @@ func main() {
 
 	// Arbiter service
 	arbiterRepo := arbiter.NewRepository(db.Pool)
-	arbiterService := arbiter.NewService(tournamentRepo, arbiterRepo, log.Logger)
-	arbiterHandler := arbiter.NewHandler(arbiterService, log.Logger)
+	arbiterService := arbiter.NewService(tournamentRepo, playerRepo, arbiterRepo, log.Logger)
+	arbiterHandler := arbiter.NewHandler(arbiterService, tournamentService, log.Logger)
 
 	// Start arbiter monitor hub for live tournament monitoring
 	go arbiterHandler.GetMonitorHub().Start(context.Background())

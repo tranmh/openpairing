@@ -39,12 +39,17 @@ import {
   Clock,
   Edit2,
   MessageSquare,
+  PlayCircle,
   RefreshCw,
   Settings,
   Shield,
   Users,
   UserMinus,
+  UserPlus,
   Shuffle,
+  Trash2,
+  ArrowLeftRight,
+  Plus,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
@@ -107,7 +112,6 @@ interface TournamentStatus {
 export default function ArbiterConsolePage() {
   const params = useParams();
   const tournamentId = params.tournamentId as string;
-  const queryClient = useQueryClient();
 
   const { data: status, isLoading, error, refetch } = useQuery<TournamentStatus>({
     queryKey: ['arbiter-status', tournamentId],
@@ -244,6 +248,14 @@ export default function ArbiterConsolePage() {
             <Users className="mr-2 h-4 w-4" />
             Teilnehmer
           </TabsTrigger>
+          <TabsTrigger value="rounds">
+            <PlayCircle className="mr-2 h-4 w-4" />
+            Runden
+          </TabsTrigger>
+          <TabsTrigger value="pairings">
+            <Shuffle className="mr-2 h-4 w-4" />
+            Paarungen
+          </TabsTrigger>
           <TabsTrigger value="actions">
             <Settings className="mr-2 h-4 w-4" />
             Aktionen
@@ -261,6 +273,23 @@ export default function ArbiterConsolePage() {
         <TabsContent value="participants">
           <ParticipantsTab
             tournamentId={tournamentId}
+            participants={status.participants}
+          />
+        </TabsContent>
+
+        <TabsContent value="rounds">
+          <RoundControlTab
+            tournamentId={tournamentId}
+            rounds={status.rounds}
+            currentRound={status.currentRound}
+            pendingResults={status.pendingResults}
+          />
+        </TabsContent>
+
+        <TabsContent value="pairings">
+          <PairingsManagementTab
+            tournamentId={tournamentId}
+            rounds={status.rounds}
             participants={status.participants}
           />
         </TabsContent>
@@ -286,8 +315,6 @@ function ActiveGamesTab({
   games: TournamentStatus['activeGames'];
   roundStatus: string;
 }) {
-  const queryClient = useQueryClient();
-
   if (games.length === 0) {
     return (
       <Card>
@@ -581,15 +608,23 @@ function ParticipantsTab({
                     <th className="text-left py-2 px-2">Spieler</th>
                     <th className="text-right py-2 px-2">Rating</th>
                     <th className="text-right py-2 px-2">Punkte</th>
+                    <th className="w-20"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {withdrawnParticipants.map((p) => (
-                    <tr key={p.id} className="border-b opacity-60">
+                    <tr key={p.id} className="border-b opacity-60 hover:opacity-100">
                       <td className="text-center py-2 px-2">{p.startRank}</td>
                       <td className="py-2 px-2">{p.playerId}</td>
                       <td className="text-right py-2 px-2">{p.startingRating}</td>
                       <td className="text-right py-2 px-2">{p.points}</td>
+                      <td className="py-2 px-2">
+                        <ReactivatePlayerDialog
+                          tournamentId={tournamentId}
+                          participantId={p.id}
+                          playerName={p.playerId}
+                        />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -611,8 +646,6 @@ function ActionsTab({
   currentRound?: TournamentStatus['currentRound'];
   participants: TournamentStatus['participants'];
 }) {
-  const queryClient = useQueryClient();
-
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <Card>
@@ -643,6 +676,833 @@ function ActionsTab({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function RoundControlTab({
+  tournamentId,
+  rounds,
+  currentRound,
+  pendingResults,
+}: {
+  tournamentId: string;
+  rounds: TournamentStatus['rounds'];
+  currentRound?: TournamentStatus['currentRound'];
+  pendingResults: number;
+}) {
+  const [selectedRound, setSelectedRound] = useState<string>(
+    currentRound?.roundNumber.toString() || '1'
+  );
+  const queryClient = useQueryClient();
+
+  const selectedRoundData = rounds.find(
+    (r) => r.roundNumber === parseInt(selectedRound)
+  );
+
+  const generatePairingsMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/arbiter/tournaments/${tournamentId}/rounds/${selectedRound}/pair`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['arbiter-status', tournamentId] });
+      toast.success('Paarungen erstellt');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.error || 'Fehler beim Erstellen der Paarungen');
+    },
+  });
+
+  const startRoundMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/arbiter/tournaments/${tournamentId}/rounds/${selectedRound}/start`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['arbiter-status', tournamentId] });
+      toast.success('Runde gestartet');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.error || 'Fehler beim Starten der Runde');
+    },
+  });
+
+  const completeRoundMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/arbiter/tournaments/${tournamentId}/rounds/${selectedRound}/complete`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['arbiter-status', tournamentId] });
+      toast.success('Runde beendet');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.error || 'Fehler beim Beenden der Runde');
+    },
+  });
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return <Badge variant="outline">Ausstehend</Badge>;
+      case 'paired':
+        return <Badge variant="secondary">Gepaart</Badge>;
+      case 'ongoing':
+        return <Badge>Läuft</Badge>;
+      case 'completed':
+        return <Badge variant="default" className="bg-green-600">Beendet</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
+    }
+  };
+
+  const isCurrentRound = currentRound?.roundNumber === parseInt(selectedRound);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Rundensteuerung</CardTitle>
+        <CardDescription>
+          Verwalten Sie den Ablauf der Turnierrunden
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="flex items-center gap-4">
+          <div className="space-y-2">
+            <Label>Runde auswählen</Label>
+            <Select value={selectedRound} onValueChange={setSelectedRound}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Runde wählen" />
+              </SelectTrigger>
+              <SelectContent>
+                {rounds.map((r) => (
+                  <SelectItem key={r.id} value={r.roundNumber.toString()}>
+                    Runde {r.roundNumber}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Status</Label>
+            <div className="h-10 flex items-center">
+              {selectedRoundData && getStatusBadge(selectedRoundData.status)}
+            </div>
+          </div>
+        </div>
+
+        {selectedRoundData && (
+          <div className="flex flex-wrap gap-3">
+            {selectedRoundData.status === 'pending' && (
+              <Button
+                onClick={() => generatePairingsMutation.mutate()}
+                disabled={generatePairingsMutation.isPending}
+              >
+                <Shuffle className="mr-2 h-4 w-4" />
+                Paarungen erstellen
+              </Button>
+            )}
+
+            {selectedRoundData.status === 'paired' && (
+              <Button
+                onClick={() => startRoundMutation.mutate()}
+                disabled={startRoundMutation.isPending}
+              >
+                <PlayCircle className="mr-2 h-4 w-4" />
+                Runde starten
+              </Button>
+            )}
+
+            {selectedRoundData.status === 'ongoing' && (
+              <Button
+                onClick={() => completeRoundMutation.mutate()}
+                disabled={completeRoundMutation.isPending || (isCurrentRound && pendingResults > 0)}
+                title={isCurrentRound && pendingResults > 0 ? `Noch ${pendingResults} offene Ergebnisse` : ''}
+              >
+                <CheckCircle2 className="mr-2 h-4 w-4" />
+                Runde beenden
+                {isCurrentRound && pendingResults > 0 && (
+                  <span className="ml-2 text-xs">({pendingResults} offen)</span>
+                )}
+              </Button>
+            )}
+
+            {selectedRoundData.status === 'completed' && (
+              <p className="text-sm text-muted-foreground flex items-center">
+                <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />
+                Diese Runde ist abgeschlossen.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="border-t pt-4">
+          <h4 className="font-medium mb-2">Rundenübersicht</h4>
+          <div className="flex flex-wrap gap-2">
+            {rounds.map((r) => (
+              <Button
+                key={r.id}
+                variant={r.roundNumber === parseInt(selectedRound) ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setSelectedRound(r.roundNumber.toString())}
+                className={cn(
+                  r.status === 'completed' && 'border-green-600',
+                  r.status === 'ongoing' && 'border-blue-600'
+                )}
+              >
+                R{r.roundNumber}
+                {r.status === 'completed' && <CheckCircle2 className="ml-1 h-3 w-3 text-green-600" />}
+              </Button>
+            ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+interface PairingGame {
+  id: string;
+  boardNumber: number;
+  whiteParticipantId?: string;
+  blackParticipantId?: string;
+  result?: string;
+  status: string;
+  whiteName?: string;
+  blackName?: string;
+  whiteRating?: number;
+  blackRating?: number;
+}
+
+function PairingsManagementTab({
+  tournamentId,
+  rounds,
+  participants,
+}: {
+  tournamentId: string;
+  rounds: TournamentStatus['rounds'];
+  participants: TournamentStatus['participants'];
+}) {
+  const [selectedRound, setSelectedRound] = useState<string>(
+    rounds.length > 0 ? rounds[rounds.length - 1].roundNumber.toString() : '1'
+  );
+
+  const selectedRoundData = rounds.find(
+    (r) => r.roundNumber === parseInt(selectedRound)
+  );
+
+  const { data: pairingsData, isLoading } = useQuery<{ games: PairingGame[] }>({
+    queryKey: ['pairings', tournamentId, selectedRound],
+    queryFn: async () => {
+      const response = await api.get(
+        `/tournaments/${tournamentId}/rounds/${selectedRound}/pairings`
+      );
+      return response.data as { games: PairingGame[] };
+    },
+    enabled: !!selectedRound && rounds.length > 0,
+  });
+
+  const pairings = pairingsData?.games || [];
+  const canEdit = selectedRoundData?.status === 'paired';
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Paarungsverwaltung</CardTitle>
+              <CardDescription>
+                Bearbeiten Sie die Paarungen der ausgewählten Runde
+              </CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <Select value={selectedRound} onValueChange={setSelectedRound}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="Runde" />
+                </SelectTrigger>
+                <SelectContent>
+                  {rounds.map((r) => (
+                    <SelectItem key={r.id} value={r.roundNumber.toString()}>
+                      Runde {r.roundNumber}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {canEdit && (
+                <>
+                  <SwapPlayersDialog
+                    tournamentId={tournamentId}
+                    roundNumber={parseInt(selectedRound)}
+                    pairings={pairings}
+                  />
+                  <CreateManualPairingDialog
+                    tournamentId={tournamentId}
+                    roundNumber={parseInt(selectedRound)}
+                    participants={participants}
+                    existingPairings={pairings}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </div>
+          ) : pairings.length === 0 ? (
+            <div className="text-center py-10">
+              <p className="text-muted-foreground">
+                Keine Paarungen für diese Runde vorhanden
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-center py-2 px-2">Brett</th>
+                    <th className="text-left py-2 px-2">Weiß</th>
+                    <th className="text-center py-2 px-2">Ergebnis</th>
+                    <th className="text-right py-2 px-2">Schwarz</th>
+                    {canEdit && <th className="w-24 text-center">Aktionen</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pairings.map((game) => (
+                    <tr key={game.id} className="border-b">
+                      <td className="text-center py-2 px-2 font-medium">
+                        {game.boardNumber}
+                      </td>
+                      <td className="py-2 px-2">
+                        {game.whiteName || game.whiteParticipantId || '-'}
+                        {game.whiteRating && (
+                          <span className="text-xs text-muted-foreground ml-1">
+                            ({game.whiteRating})
+                          </span>
+                        )}
+                      </td>
+                      <td className="text-center py-2 px-2">
+                        {game.result ? (
+                          <Badge>{game.result}</Badge>
+                        ) : (
+                          <Badge variant="outline">-</Badge>
+                        )}
+                      </td>
+                      <td className="text-right py-2 px-2">
+                        {game.blackParticipantId ? (
+                          <>
+                            {game.blackRating && (
+                              <span className="text-xs text-muted-foreground mr-1">
+                                ({game.blackRating})
+                              </span>
+                            )}
+                            {game.blackName || game.blackParticipantId}
+                          </>
+                        ) : (
+                          <span className="italic text-muted-foreground">
+                            spielfrei
+                          </span>
+                        )}
+                      </td>
+                      {canEdit && (
+                        <td className="py-2 px-2">
+                          <div className="flex justify-center gap-1">
+                            {game.blackParticipantId && !game.result && (
+                              <ChangeColorDialog
+                                tournamentId={tournamentId}
+                                gameId={game.id}
+                                whiteName={game.whiteName || 'Weiß'}
+                                blackName={game.blackName || 'Schwarz'}
+                              />
+                            )}
+                            {!game.result && (
+                              <DeletePairingDialog
+                                tournamentId={tournamentId}
+                                gameId={game.id}
+                                boardNumber={game.boardNumber}
+                              />
+                            )}
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {!canEdit && selectedRoundData && (
+        <p className="text-sm text-muted-foreground text-center">
+          Paarungen können nur bearbeitet werden, wenn die Runde den Status
+          &quot;Gepaart&quot; hat. Aktueller Status:{' '}
+          <Badge variant="outline">{selectedRoundData.status}</Badge>
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ChangeColorDialog({
+  tournamentId,
+  gameId,
+  whiteName,
+  blackName,
+}: {
+  tournamentId: string;
+  gameId: string;
+  whiteName: string;
+  blackName: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.post(`/arbiter/tournaments/${tournamentId}/change-color`, {
+        gameId,
+        reason: reason || 'Farbwechsel durch Schiedsrichter',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pairings', tournamentId] });
+      queryClient.invalidateQueries({ queryKey: ['arbiter-status', tournamentId] });
+      toast.success('Farben getauscht');
+      setOpen(false);
+      setReason('');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.error || 'Fehler beim Farbwechsel');
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm" title="Farben tauschen">
+          <ArrowLeftRight className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Farben tauschen</DialogTitle>
+          <DialogDescription>
+            {whiteName} und {blackName} tauschen die Farben.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Begründung (optional)</Label>
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Grund für den Farbwechsel"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Abbrechen
+          </Button>
+          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+            Farben tauschen
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeletePairingDialog({
+  tournamentId,
+  gameId,
+  boardNumber,
+}: {
+  tournamentId: string;
+  gameId: string;
+  boardNumber: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.delete(
+        `/arbiter/tournaments/${tournamentId}/pairings/${gameId}?reason=${encodeURIComponent(reason || 'Paarung gelöscht durch Schiedsrichter')}`
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pairings', tournamentId] });
+      queryClient.invalidateQueries({ queryKey: ['arbiter-status', tournamentId] });
+      toast.success('Paarung gelöscht');
+      setOpen(false);
+      setReason('');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.error || 'Fehler beim Löschen');
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm" title="Paarung löschen">
+          <Trash2 className="h-4 w-4 text-destructive" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Paarung löschen</DialogTitle>
+          <DialogDescription>
+            Die Paarung auf Brett {boardNumber} wird gelöscht.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Begründung (optional)</Label>
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Grund für das Löschen"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Abbrechen
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending}
+          >
+            Löschen
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SwapPlayersDialog({
+  tournamentId,
+  roundNumber,
+  pairings,
+}: {
+  tournamentId: string;
+  roundNumber: number;
+  pairings: PairingGame[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [game1Id, setGame1Id] = useState('');
+  const [player1Id, setPlayer1Id] = useState('');
+  const [game2Id, setGame2Id] = useState('');
+  const [player2Id, setPlayer2Id] = useState('');
+  const [reason, setReason] = useState('');
+  const queryClient = useQueryClient();
+
+  const game1 = pairings.find((p) => p.id === game1Id);
+  const game2 = pairings.find((p) => p.id === game2Id);
+
+  const game1Players = game1
+    ? [
+        { id: game1.whiteParticipantId, name: game1.whiteName || 'Weiß', color: 'Weiß' },
+        { id: game1.blackParticipantId, name: game1.blackName || 'Schwarz', color: 'Schwarz' },
+      ].filter((p) => p.id)
+    : [];
+
+  const game2Players = game2
+    ? [
+        { id: game2.whiteParticipantId, name: game2.whiteName || 'Weiß', color: 'Weiß' },
+        { id: game2.blackParticipantId, name: game2.blackName || 'Schwarz', color: 'Schwarz' },
+      ].filter((p) => p.id)
+    : [];
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.post(`/arbiter/tournaments/${tournamentId}/swap-pairing`, {
+        roundNumber,
+        game1Id,
+        player1Id,
+        game2Id,
+        player2Id,
+        reason: reason || 'Spielertausch durch Schiedsrichter',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pairings', tournamentId] });
+      queryClient.invalidateQueries({ queryKey: ['arbiter-status', tournamentId] });
+      toast.success('Spieler getauscht');
+      setOpen(false);
+      resetForm();
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.error || 'Fehler beim Tauschen');
+    },
+  });
+
+  const resetForm = () => {
+    setGame1Id('');
+    setPlayer1Id('');
+    setGame2Id('');
+    setPlayer2Id('');
+    setReason('');
+  };
+
+  const availableGames = pairings.filter(
+    (p) => !p.result && p.blackParticipantId
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <ArrowLeftRight className="mr-2 h-4 w-4" />
+          Spieler tauschen
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Spieler zwischen Paarungen tauschen</DialogTitle>
+          <DialogDescription>
+            Wählen Sie zwei Partien und jeweils einen Spieler zum Tauschen.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Partie 1</Label>
+              <Select value={game1Id} onValueChange={(v) => { setGame1Id(v); setPlayer1Id(''); }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Partie wählen" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableGames
+                    .filter((g) => g.id !== game2Id)
+                    .map((g) => (
+                      <SelectItem key={g.id} value={g.id}>
+                        Brett {g.boardNumber}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              {game1Id && (
+                <Select value={player1Id} onValueChange={setPlayer1Id}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Spieler wählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {game1Players.map((p) => (
+                      <SelectItem key={p.id} value={p.id!}>
+                        {p.name} ({p.color})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Partie 2</Label>
+              <Select value={game2Id} onValueChange={(v) => { setGame2Id(v); setPlayer2Id(''); }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Partie wählen" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableGames
+                    .filter((g) => g.id !== game1Id)
+                    .map((g) => (
+                      <SelectItem key={g.id} value={g.id}>
+                        Brett {g.boardNumber}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              {game2Id && (
+                <Select value={player2Id} onValueChange={setPlayer2Id}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Spieler wählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {game2Players.map((p) => (
+                      <SelectItem key={p.id} value={p.id!}>
+                        {p.name} ({p.color})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Begründung (optional)</Label>
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Grund für den Spielertausch"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Abbrechen
+          </Button>
+          <Button
+            onClick={() => mutation.mutate()}
+            disabled={!game1Id || !player1Id || !game2Id || !player2Id || mutation.isPending}
+          >
+            Spieler tauschen
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CreateManualPairingDialog({
+  tournamentId,
+  roundNumber,
+  participants,
+  existingPairings,
+}: {
+  tournamentId: string;
+  roundNumber: number;
+  participants: TournamentStatus['participants'];
+  existingPairings: PairingGame[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [whiteParticipantId, setWhiteParticipantId] = useState('');
+  const [blackParticipantId, setBlackParticipantId] = useState('');
+  const [boardNumber, setBoardNumber] = useState('');
+  const queryClient = useQueryClient();
+
+  // Find participants already paired in this round
+  const pairedParticipantIds = new Set<string>();
+  existingPairings.forEach((p) => {
+    if (p.whiteParticipantId) pairedParticipantIds.add(p.whiteParticipantId);
+    if (p.blackParticipantId) pairedParticipantIds.add(p.blackParticipantId);
+  });
+
+  // Active participants not yet paired
+  const availableParticipants = participants.filter(
+    (p) => p.isActive && !pairedParticipantIds.has(p.id)
+  );
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.post(`/arbiter/tournaments/${tournamentId}/create-pairing`, {
+        roundNumber,
+        whiteParticipantId,
+        blackParticipantId: blackParticipantId === 'BYE' ? null : blackParticipantId,
+        boardNumber: boardNumber ? parseInt(boardNumber) : undefined,
+      }),
+    onSuccess: (response: any) => {
+      queryClient.invalidateQueries({ queryKey: ['pairings', tournamentId] });
+      queryClient.invalidateQueries({ queryKey: ['arbiter-status', tournamentId] });
+
+      // Show warnings if any
+      if (response.data?.warnings?.length > 0) {
+        response.data.warnings.forEach((w: { message: string }) => {
+          toast.warning(w.message);
+        });
+      }
+
+      toast.success('Paarung erstellt');
+      setOpen(false);
+      resetForm();
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.error || 'Fehler beim Erstellen');
+    },
+  });
+
+  const resetForm = () => {
+    setWhiteParticipantId('');
+    setBlackParticipantId('');
+    setBoardNumber('');
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Plus className="mr-2 h-4 w-4" />
+          Neue Paarung
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Manuelle Paarung erstellen</DialogTitle>
+          <DialogDescription>
+            Erstellen Sie eine neue Paarung für Runde {roundNumber}.
+            {availableParticipants.length === 0 && (
+              <span className="text-destructive block mt-1">
+                Alle Teilnehmer sind bereits gepaart.
+              </span>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Weiß</Label>
+            <Select value={whiteParticipantId} onValueChange={setWhiteParticipantId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Spieler mit Weiß" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableParticipants
+                  .filter((p) => p.id !== blackParticipantId)
+                  .map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.startRank}. {p.playerId} ({p.startingRating})
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Schwarz</Label>
+            <Select value={blackParticipantId} onValueChange={setBlackParticipantId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Spieler mit Schwarz oder Spielfrei" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="BYE">
+                  <span className="italic">Spielfrei (BYE)</span>
+                </SelectItem>
+                {availableParticipants
+                  .filter((p) => p.id !== whiteParticipantId)
+                  .map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.startRank}. {p.playerId} ({p.startingRating})
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Brettnummer (optional)</Label>
+            <Input
+              type="number"
+              min="1"
+              value={boardNumber}
+              onChange={(e) => setBoardNumber(e.target.value)}
+              placeholder="Automatisch zuweisen"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Abbrechen
+          </Button>
+          <Button
+            onClick={() => mutation.mutate()}
+            disabled={!whiteParticipantId || !blackParticipantId || mutation.isPending}
+          >
+            Paarung erstellen
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -792,7 +1652,6 @@ function CreateAnnouncementDialog({ tournamentId }: { tournamentId: string }) {
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [priority, setPriority] = useState('info');
-  const queryClient = useQueryClient();
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -867,6 +1726,93 @@ function CreateAnnouncementDialog({ tournamentId }: { tournamentId: string }) {
             disabled={!title || !message || mutation.isPending}
           >
             Veröffentlichen
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ReactivatePlayerDialog({
+  tournamentId,
+  participantId,
+  playerName,
+}: {
+  tournamentId: string;
+  participantId: string;
+  playerName: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [missedRoundPoints, setMissedRoundPoints] = useState('0');
+  const [reason, setReason] = useState('');
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.post(`/arbiter/tournaments/${tournamentId}/reactivate-player`, {
+        participantId,
+        missedRoundPoints: parseFloat(missedRoundPoints) || 0,
+        reason: reason || 'Reaktivierung durch Schiedsrichter',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['arbiter-status', tournamentId] });
+      toast.success('Spieler reaktiviert');
+      setOpen(false);
+      setMissedRoundPoints('0');
+      setReason('');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.error || 'Fehler bei Reaktivierung');
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm" title="Spieler reaktivieren">
+          <UserPlus className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Spieler reaktivieren</DialogTitle>
+          <DialogDescription>
+            {playerName} wird wieder am Turnier teilnehmen.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Punkte für verpasste Runden</Label>
+            <Input
+              type="number"
+              step="0.5"
+              min="0"
+              value={missedRoundPoints}
+              onChange={(e) => setMissedRoundPoints(e.target.value)}
+              placeholder="0"
+            />
+            <p className="text-xs text-muted-foreground">
+              Optional: Punkte, die für verpasste Runden gutgeschrieben werden
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label>Begründung</Label>
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Grund für die Reaktivierung (optional)"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Abbrechen
+          </Button>
+          <Button
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending}
+          >
+            Reaktivieren
           </Button>
         </DialogFooter>
       </DialogContent>

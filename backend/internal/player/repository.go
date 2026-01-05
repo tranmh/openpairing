@@ -23,6 +23,7 @@ var (
 type Repository interface {
 	Create(ctx context.Context, player *Player) error
 	GetByID(ctx context.Context, id uuid.UUID) (*Player, error)
+	GetByIDs(ctx context.Context, ids []uuid.UUID) ([]Player, error)
 	GetByFideID(ctx context.Context, fideID string) (*Player, error)
 	GetByDsbID(ctx context.Context, dsbID string) (*Player, error)
 	GetByOesbID(ctx context.Context, oesbID string) (*Player, error)
@@ -134,6 +135,53 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (*Player
 	}
 
 	return &player, nil
+}
+
+func (r *PostgresRepository) GetByIDs(ctx context.Context, ids []uuid.UUID) ([]Player, error) {
+	if len(ids) == 0 {
+		return []Player{}, nil
+	}
+
+	query := `
+		SELECT
+			p.id, p.user_id, p.first_name, p.last_name, p.birth_date, p.gender,
+			p.fide_id, p.dsb_id, p.oesb_id, p.ssb_id,
+			p.fide_standard, p.fide_rapid, p.fide_blitz, p.dwz, p.dwz_index, p.oesb_elo,
+			p.fide_title, p.national_title, p.club_id, p.federation,
+			p.ratings_updated_at, p.created_at, p.updated_at,
+			c.name as club_name
+		FROM players p
+		LEFT JOIN clubs c ON p.club_id = c.id
+		WHERE p.id = ANY($1)`
+
+	rows, err := r.db.Query(ctx, query, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get players by IDs: %w", err)
+	}
+	defer rows.Close()
+
+	var players []Player
+	for rows.Next() {
+		var player Player
+		err := rows.Scan(
+			&player.ID, &player.UserID, &player.FirstName, &player.LastName, &player.BirthDate, &player.Gender,
+			&player.FideID, &player.DsbID, &player.OesbID, &player.SsbID,
+			&player.FideStandard, &player.FideRapid, &player.FideBlitz, &player.DWZ, &player.DWZIndex, &player.OesbElo,
+			&player.FideTitle, &player.NationalTitle, &player.ClubID, &player.Federation,
+			&player.RatingsUpdatedAt, &player.CreatedAt, &player.UpdatedAt,
+			&player.ClubName,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan player: %w", err)
+		}
+		players = append(players, player)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating players: %w", err)
+	}
+
+	return players, nil
 }
 
 func (r *PostgresRepository) GetByFideID(ctx context.Context, fideID string) (*Player, error) {
