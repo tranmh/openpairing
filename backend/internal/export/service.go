@@ -13,6 +13,7 @@ import (
 type Service struct {
 	repo         *Repository
 	pgnGenerator *PGNGenerator
+	pdfGenerator *PDFGenerator
 }
 
 // NewService creates a new export service
@@ -20,6 +21,7 @@ func NewService(repo *Repository) *Service {
 	return &Service{
 		repo:         repo,
 		pgnGenerator: NewPGNGenerator(),
+		pdfGenerator: NewPDFGenerator(),
 	}
 }
 
@@ -232,4 +234,58 @@ func escapeCSV(s string) string {
 		return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
 	}
 	return s
+}
+
+// ExportStandingsPDF exports tournament standings in PDF format
+func (s *Service) ExportStandingsPDF(ctx context.Context, tournamentID uuid.UUID) (*PDFExportResponse, error) {
+	tournament, err := s.repo.GetTournamentExportData(ctx, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tournament data: %w", err)
+	}
+
+	pdfBytes, err := s.pdfGenerator.GenerateStandingsPDF(tournament)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate PDF: %w", err)
+	}
+
+	safeName := sanitizeFilename(tournament.Name)
+	filename := fmt.Sprintf("%s_standings.pdf", safeName)
+
+	return &PDFExportResponse{
+		Format:   FormatPDF,
+		Filename: filename,
+		Content:  pdfBytes,
+		MimeType: FormatPDF.GetMimeType(),
+	}, nil
+}
+
+// ExportCrosstablePDF exports tournament crosstable in PDF format
+func (s *Service) ExportCrosstablePDF(ctx context.Context, tournamentID uuid.UUID) (*PDFExportResponse, error) {
+	tournament, err := s.repo.GetTournamentExportData(ctx, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tournament data: %w", err)
+	}
+
+	pdfBytes, err := s.pdfGenerator.GenerateCrosstablePDF(tournament)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate PDF: %w", err)
+	}
+
+	safeName := sanitizeFilename(tournament.Name)
+	filename := fmt.Sprintf("%s_crosstable.pdf", safeName)
+
+	return &PDFExportResponse{
+		Format:   FormatPDF,
+		Filename: filename,
+		Content:  pdfBytes,
+		MimeType: FormatPDF.GetMimeType(),
+	}, nil
+}
+
+// PDFExportResponse contains the exported PDF data (binary)
+type PDFExportResponse struct {
+	Format   ExportFormat `json:"format"`
+	Filename string       `json:"filename"`
+	Content  []byte       `json:"-"` // Binary content, not included in JSON
+	MimeType string       `json:"mimeType"`
 }

@@ -213,3 +213,67 @@ func (h *Handler) ExportCrosstableCSV(c *gin.Context) {
 	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
 	c.Data(http.StatusOK, export.MimeType, []byte(export.Content))
 }
+
+// ExportStandingsPDF exports tournament standings in PDF format
+// @Summary Export standings as PDF
+// @Description Export tournament standings in PDF format
+// @Tags export
+// @Produce application/pdf
+// @Param id path string true "Tournament ID"
+// @Success 200 {file} file "PDF file"
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /tournaments/{id}/export/standings/pdf [get]
+func (h *Handler) ExportStandingsPDF(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	export, err := h.service.ExportStandingsPDF(c.Request.Context(), id)
+	if err != nil {
+		if err.Error() == "tournament not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	c.Data(http.StatusOK, export.MimeType, export.Content)
+}
+
+// ExportCrosstablePDF exports tournament crosstable in PDF format
+// @Summary Export crosstable as PDF
+// @Description Export tournament crosstable in PDF format
+// @Tags export
+// @Produce application/pdf
+// @Param id path string true "Tournament ID"
+// @Success 200 {file} file "PDF file"
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /tournaments/{id}/export/crosstable/pdf [get]
+func (h *Handler) ExportCrosstablePDF(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	export, err := h.service.ExportCrosstablePDF(c.Request.Context(), id)
+	if err != nil {
+		if err.Error() == "tournament not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	c.Data(http.StatusOK, export.MimeType, export.Content)
+}

@@ -14,6 +14,7 @@ const (
 	FormatJSON ExportFormat = "json"
 	FormatCSV  ExportFormat = "csv"
 	FormatTXT  ExportFormat = "txt"
+	FormatPDF  ExportFormat = "pdf"
 )
 
 // PGNHeader contains standard PGN seven tag roster headers
@@ -126,6 +127,8 @@ func (f ExportFormat) GetMimeType() string {
 		return "text/csv"
 	case FormatTXT:
 		return "text/plain"
+	case FormatPDF:
+		return "application/pdf"
 	default:
 		return "application/octet-stream"
 	}
@@ -142,6 +145,8 @@ func (f ExportFormat) GetFileExtension() string {
 		return ".csv"
 	case FormatTXT:
 		return ".txt"
+	case FormatPDF:
+		return ".pdf"
 	default:
 		return ""
 	}
