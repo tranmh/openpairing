@@ -355,6 +355,34 @@ import type {
   JokerValue,
 } from '@/types/wam';
 
+// Federation API types
+export interface FederationPlayer {
+  id: string; // VKZ-Spielernummer (e.g., "56024-173")
+  name: string; // Last name
+  firstName?: string;
+  lastName?: string;
+  federation: string; // "DSB", "FIDE", etc.
+  rating?: number; // DWZ for DSB
+  fideId?: string;
+  fideRating?: number;
+  title?: string;
+  club?: string;
+}
+
+export interface FederationSearchResponse {
+  results: FederationPlayer[];
+  source: string;
+}
+
+// Federation API
+export const federationApi = {
+  search: (query: string, federation: 'dsb' | 'fide' | 'oesb' | 'ssb', limit?: number) => {
+    const params: Record<string, string> = { q: query, federation };
+    if (limit) params.limit = String(limit);
+    return api.get<FederationSearchResponse>('/federation/search', params);
+  },
+};
+
 export const wamApi = {
   // Get WAM tournament status and groups
   getStatus: (tournamentId: string) =>

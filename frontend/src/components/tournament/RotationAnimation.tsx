@@ -237,7 +237,7 @@ export function RotationAnimation({
         <div className="w-full">
           <Slider
             value={[progress]}
-            onValueChange={([v]) => {
+            onValueChange={([v]: number[]) => {
               setIsPlaying(false);
               setProgress(v);
             }}

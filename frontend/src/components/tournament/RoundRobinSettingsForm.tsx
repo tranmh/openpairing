@@ -101,7 +101,7 @@ export function RoundRobinSettingsForm({
           <Switch
             id="showSeatingChart"
             checked={settings.showSeatingChart}
-            onCheckedChange={(checked) =>
+            onCheckedChange={(checked: boolean) =>
               setSettings({ ...settings, showSeatingChart: checked })
             }
           />
