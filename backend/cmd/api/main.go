@@ -22,11 +22,13 @@ import (
 	"github.com/openpairing/openpairing/internal/federation/ssb"
 	"github.com/openpairing/openpairing/internal/middleware"
 	"github.com/openpairing/openpairing/internal/notification"
+	"github.com/openpairing/openpairing/internal/organization"
 	"github.com/openpairing/openpairing/internal/pairing/engine"
 	"github.com/openpairing/openpairing/internal/player"
 	"github.com/openpairing/openpairing/internal/reports"
 	"github.com/openpairing/openpairing/internal/result"
 	"github.com/openpairing/openpairing/internal/standings"
+	"github.com/openpairing/openpairing/internal/team"
 	"github.com/openpairing/openpairing/internal/tournament"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -167,6 +169,16 @@ func main() {
 	resultService := result.NewService(resultRepo)
 	resultHandler := result.NewHandler(resultService)
 
+	// Organization service
+	organizationRepo := organization.NewRepository(db.Pool)
+	organizationService := organization.NewService(organizationRepo, log.Logger)
+	organizationHandler := organization.NewHandler(organizationService, log.Logger)
+
+	// Team service
+	teamRepo := team.NewRepository(db.Pool)
+	teamService := team.NewService(teamRepo, log.Logger)
+	teamHandler := team.NewHandler(teamService, log.Logger)
+
 	// Configure rate limiting
 	middleware.RateLimitEnabled = cfg.RateLimit.Enabled
 	if !cfg.RateLimit.Enabled {
@@ -174,7 +186,7 @@ func main() {
 	}
 
 	// Create Gin router
-	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler, exportHandler, standingsHandler, resultHandler)
+	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler, exportHandler, standingsHandler, resultHandler, organizationHandler, teamHandler)
 
 	// Create server
 	srv := &http.Server{
@@ -228,7 +240,7 @@ func main() {
 	log.Info().Msg("Server exited")
 }
 
-func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler, reportsHandler *reports.Handler, exportHandler *export.Handler, standingsHandler *standings.Handler, resultHandler *result.Handler) *gin.Engine {
+func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler, reportsHandler *reports.Handler, exportHandler *export.Handler, standingsHandler *standings.Handler, resultHandler *result.Handler, organizationHandler *organization.Handler, teamHandler *team.Handler) *gin.Engine {
 	// Set Gin mode
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -288,35 +300,10 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 		reportsHandler.RegisterRoutes(v1)
 
 		// Organization routes
-		orgs := v1.Group("/organizations")
-		orgs.Use(middleware.APIRateLimit())
-		{
-			orgs.GET("", notImplemented)
-			orgs.POST("", authMiddleware.Authenticate(), notImplemented)
-			orgs.GET("/:id", notImplemented)
-			orgs.PUT("/:id", authMiddleware.Authenticate(), notImplemented)
-			orgs.GET("/:id/tournaments", notImplemented)
-		}
+		organizationHandler.RegisterRoutes(v1, authMiddleware.Authenticate())
 
-		// Team routes
-		teams := v1.Group("/teams")
-		teams.Use(middleware.APIRateLimit())
-		{
-			teams.GET("", notImplemented)
-			teams.POST("", authMiddleware.Authenticate(), notImplemented)
-			teams.GET("/:id", notImplemented)
-			teams.PUT("/:id", authMiddleware.Authenticate(), notImplemented)
-			teams.GET("/:id/members", notImplemented)
-			teams.POST("/:id/members", authMiddleware.Authenticate(), notImplemented)
-			teams.DELETE("/:id/members/:pid", authMiddleware.Authenticate(), notImplemented)
-		}
-
-		// Club routes
-		clubs := v1.Group("/clubs")
-		clubs.Use(middleware.APIRateLimit())
-		{
-			clubs.GET("/:id/teams", notImplemented)
-		}
+		// Team routes (includes club teams)
+		teamHandler.RegisterRoutes(v1, authMiddleware.Authenticate())
 
 		// Online games
 		games := v1.Group("/games")
