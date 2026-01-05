@@ -36,6 +36,7 @@ const (
 	StatusPublished    TournamentStatus = "published"
 	StatusRegistration TournamentStatus = "registration"
 	StatusOngoing      TournamentStatus = "ongoing"
+	StatusPairing      TournamentStatus = "pairing" // Locked during pairing generation
 	StatusCompleted    TournamentStatus = "completed"
 	StatusCancelled    TournamentStatus = "cancelled"
 )
@@ -126,6 +127,9 @@ type Tournament struct {
 	// Status
 	Status TournamentStatus `json:"status" db:"status"`
 
+	// Rating Lock
+	RatingsLockedAt *time.Time `json:"ratingsLockedAt,omitempty" db:"ratings_locked_at"`
+
 	// Tiebreaks (JSON array)
 	Tiebreaks []string `json:"tiebreaks" db:"tiebreaks"`
 
@@ -165,8 +169,9 @@ type Participant struct {
 	RegisteredAt       time.Time `json:"registeredAt" db:"registered_at"`
 
 	// Starting Info
-	StartRank      int `json:"startRank" db:"start_rank"`
-	StartingRating int `json:"startingRating" db:"starting_rating"`
+	StartRank            int  `json:"startRank" db:"start_rank"`
+	StartingRating       int  `json:"startingRating" db:"starting_rating"`
+	ManualRatingOverride *int `json:"manualRatingOverride,omitempty" db:"manual_rating_override"`
 
 	// Results (denormalized)
 	Points          float64 `json:"points" db:"points"`
@@ -190,6 +195,15 @@ type Participant struct {
 	PlayerLastName  *string `json:"playerLastName,omitempty" db:"player_last_name"`
 	PlayerFideID    *string `json:"playerFideId,omitempty" db:"player_fide_id"`
 	PlayerClubName  *string `json:"playerClubName,omitempty" db:"player_club_name"`
+}
+
+// EffectiveRating returns the rating to use for pairing.
+// Returns ManualRatingOverride if set, otherwise StartingRating.
+func (p *Participant) EffectiveRating() int {
+	if p.ManualRatingOverride != nil {
+		return *p.ManualRatingOverride
+	}
+	return p.StartingRating
 }
 
 // Round represents a tournament round

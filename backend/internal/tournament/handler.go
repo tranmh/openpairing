@@ -63,6 +63,11 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 			organizer.DELETE("/:id/participants/:participantId", h.WithdrawParticipant)
 			organizer.POST("/:id/assign-ranks", h.AssignStartRanks)
 
+			// Rating management (organizer only)
+			organizer.POST("/:id/lock-ratings", h.LockRatings)
+			organizer.PUT("/:id/participants/:participantId/rating-override", h.SetRatingOverride)
+			organizer.DELETE("/:id/participants/:participantId/rating-override", h.ClearRatingOverride)
+
 			// Rounds & Pairings (organizer only)
 			organizer.POST("/:id/rounds/:round/pair", h.GeneratePairings)
 			organizer.POST("/:id/rounds/:round/start", h.StartRound)
@@ -813,6 +818,79 @@ func (h *Handler) RemoveForbiddenPair(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// LockRatings locks ratings for a tournament
+// @Summary Lock ratings
+// @Tags tournaments
+// @Param id path string true "Tournament ID"
+// @Success 204
+// @Router /tournaments/{id}/lock-ratings [post]
+func (h *Handler) LockRatings(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	if err := h.service.LockRatings(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// SetRatingOverride sets a manual rating override for a participant
+// @Summary Set rating override
+// @Tags tournaments
+// @Accept json
+// @Param id path string true "Tournament ID"
+// @Param participantId path string true "Participant ID"
+// @Param request body SetRatingOverrideRequest true "Rating override"
+// @Success 204
+// @Router /tournaments/{id}/participants/{participantId}/rating-override [put]
+func (h *Handler) SetRatingOverride(c *gin.Context) {
+	participantID, err := uuid.Parse(c.Param("participantId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid participant ID"})
+		return
+	}
+
+	var req SetRatingOverrideRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.service.SetParticipantRatingOverride(c.Request.Context(), participantID, &req.Rating); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// ClearRatingOverride clears the manual rating override for a participant
+// @Summary Clear rating override
+// @Tags tournaments
+// @Param id path string true "Tournament ID"
+// @Param participantId path string true "Participant ID"
+// @Success 204
+// @Router /tournaments/{id}/participants/{participantId}/rating-override [delete]
+func (h *Handler) ClearRatingOverride(c *gin.Context) {
+	participantID, err := uuid.Parse(c.Param("participantId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid participant ID"})
+		return
+	}
+
+	if err := h.service.SetParticipantRatingOverride(c.Request.Context(), participantID, nil); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 // Response types
 
 // TournamentResponse wraps a tournament
@@ -887,6 +965,11 @@ type AddForbiddenPairRequest struct {
 type EnterResultRequest struct {
 	Result string `json:"result" binding:"required"`
 	PGN    string `json:"pgn"`
+}
+
+// SetRatingOverrideRequest for setting a manual rating override
+type SetRatingOverrideRequest struct {
+	Rating int `json:"rating" binding:"required,min=0"`
 }
 
 // TournamentFilter helper for StartDate/EndDate

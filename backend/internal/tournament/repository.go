@@ -175,7 +175,7 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (*Tourna
 			max_players, min_players, rounds,
 			venue_name, venue_address, venue_city, venue_country,
 			fide_rated, dwz_rated, oesb_rated,
-			entry_fee_cents, currency, status,
+			entry_fee_cents, currency, status, ratings_locked_at,
 			tiebreaks, settings, current_round, participant_count,
 			created_at, updated_at
 		FROM tournaments WHERE id = $1`
@@ -191,7 +191,7 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (*Tourna
 		&t.MaxPlayers, &t.MinPlayers, &t.Rounds,
 		&t.VenueName, &t.VenueAddress, &t.VenueCity, &t.VenueCountry,
 		&t.FideRated, &t.DwzRated, &t.OesbRated,
-		&t.EntryFeeCents, &t.Currency, &t.Status,
+		&t.EntryFeeCents, &t.Currency, &t.Status, &t.RatingsLockedAt,
 		&tiebreaksJSON, &settingsJSON, &t.CurrentRound, &t.ParticipantCount,
 		&t.CreatedAt, &t.UpdatedAt,
 	)
@@ -238,10 +238,10 @@ func (r *PostgresRepository) Update(ctx context.Context, t *Tournament) error {
 			max_players = $12, rounds = $13,
 			venue_name = $14, venue_address = $15, venue_city = $16,
 			fide_rated = $17, dwz_rated = $18, oesb_rated = $19,
-			entry_fee_cents = $20, status = $21,
-			tiebreaks = $22, settings = $23,
-			current_round = $24, participant_count = $25,
-			updated_at = $26
+			entry_fee_cents = $20, status = $21, ratings_locked_at = $22,
+			tiebreaks = $23, settings = $24,
+			current_round = $25, participant_count = $26,
+			updated_at = $27
 		WHERE id = $1`
 
 	result, err := r.db.Exec(ctx, query,
@@ -253,7 +253,7 @@ func (r *PostgresRepository) Update(ctx context.Context, t *Tournament) error {
 		t.MaxPlayers, t.Rounds,
 		t.VenueName, t.VenueAddress, t.VenueCity,
 		t.FideRated, t.DwzRated, t.OesbRated,
-		t.EntryFeeCents, t.Status,
+		t.EntryFeeCents, t.Status, t.RatingsLockedAt,
 		tiebreaksJSON, settingsJSON,
 		t.CurrentRound, t.ParticipantCount,
 		t.UpdatedAt,
@@ -336,7 +336,7 @@ func (r *PostgresRepository) List(ctx context.Context, filters *ListFilters) ([]
 			max_players, min_players, rounds,
 			venue_name, venue_address, venue_city, venue_country,
 			fide_rated, dwz_rated, oesb_rated,
-			entry_fee_cents, currency, status,
+			entry_fee_cents, currency, status, ratings_locked_at,
 			tiebreaks, settings, current_round, participant_count,
 			created_at, updated_at
 		FROM tournaments
@@ -364,7 +364,7 @@ func (r *PostgresRepository) List(ctx context.Context, filters *ListFilters) ([]
 			&t.MaxPlayers, &t.MinPlayers, &t.Rounds,
 			&t.VenueName, &t.VenueAddress, &t.VenueCity, &t.VenueCountry,
 			&t.FideRated, &t.DwzRated, &t.OesbRated,
-			&t.EntryFeeCents, &t.Currency, &t.Status,
+			&t.EntryFeeCents, &t.Currency, &t.Status, &t.RatingsLockedAt,
 			&tiebreaksJSON, &settingsJSON, &t.CurrentRound, &t.ParticipantCount,
 			&t.CreatedAt, &t.UpdatedAt,
 		)
@@ -442,7 +442,7 @@ func (r *PostgresRepository) GetParticipant(ctx context.Context, id uuid.UUID) (
 		SELECT
 			tp.id, tp.tournament_id, tp.section_id, tp.player_id,
 			tp.registration_status, tp.registered_at,
-			tp.start_rank, tp.starting_rating,
+			tp.start_rank, tp.starting_rating, tp.manual_rating_override,
 			tp.points, tp.buchholz, tp.buchholz_cut1, tp.sonneborn_berger,
 			tp.wins, tp.draws, tp.losses, tp.is_active, tp.bye_requests,
 			tp.payment_status, tp.payment_reference,
@@ -457,7 +457,7 @@ func (r *PostgresRepository) GetParticipant(ctx context.Context, id uuid.UUID) (
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&participant.ID, &participant.TournamentID, &participant.SectionID, &participant.PlayerID,
 		&participant.RegistrationStatus, &participant.RegisteredAt,
-		&participant.StartRank, &participant.StartingRating,
+		&participant.StartRank, &participant.StartingRating, &participant.ManualRatingOverride,
 		&participant.Points, &participant.Buchholz, &participant.BuchholzCut1, &participant.SonnebornBerger,
 		&participant.Wins, &participant.Draws, &participant.Losses, &participant.IsActive, &byeRequestsJSON,
 		&participant.PaymentStatus, &participant.PaymentReference,
@@ -495,15 +495,15 @@ func (r *PostgresRepository) UpdateParticipant(ctx context.Context, p *Participa
 	query := `
 		UPDATE tournament_participants SET
 			registration_status = $2,
-			start_rank = $3, starting_rating = $4,
-			points = $5, buchholz = $6, buchholz_cut1 = $7, sonneborn_berger = $8,
-			wins = $9, draws = $10, losses = $11, is_active = $12, bye_requests = $13,
-			payment_status = $14, payment_reference = $15
+			start_rank = $3, starting_rating = $4, manual_rating_override = $5,
+			points = $6, buchholz = $7, buchholz_cut1 = $8, sonneborn_berger = $9,
+			wins = $10, draws = $11, losses = $12, is_active = $13, bye_requests = $14,
+			payment_status = $15, payment_reference = $16
 		WHERE id = $1`
 
 	result, err := r.db.Exec(ctx, query,
 		p.ID, p.RegistrationStatus,
-		p.StartRank, p.StartingRating,
+		p.StartRank, p.StartingRating, p.ManualRatingOverride,
 		p.Points, p.Buchholz, p.BuchholzCut1, p.SonnebornBerger,
 		p.Wins, p.Draws, p.Losses, p.IsActive, byeRequestsJSON,
 		p.PaymentStatus, p.PaymentReference,
@@ -551,7 +551,7 @@ func (r *PostgresRepository) ListParticipants(ctx context.Context, tournamentID 
 		SELECT
 			tp.id, tp.tournament_id, tp.section_id, tp.player_id,
 			tp.registration_status, tp.registered_at,
-			tp.start_rank, tp.starting_rating,
+			tp.start_rank, tp.starting_rating, tp.manual_rating_override,
 			tp.points, tp.buchholz, tp.buchholz_cut1, tp.sonneborn_berger,
 			tp.wins, tp.draws, tp.losses, tp.is_active, tp.bye_requests,
 			tp.payment_status, tp.payment_reference,
@@ -577,7 +577,7 @@ func (r *PostgresRepository) ListParticipants(ctx context.Context, tournamentID 
 		err := rows.Scan(
 			&p.ID, &p.TournamentID, &p.SectionID, &p.PlayerID,
 			&p.RegistrationStatus, &p.RegisteredAt,
-			&p.StartRank, &p.StartingRating,
+			&p.StartRank, &p.StartingRating, &p.ManualRatingOverride,
 			&p.Points, &p.Buchholz, &p.BuchholzCut1, &p.SonnebornBerger,
 			&p.Wins, &p.Draws, &p.Losses, &p.IsActive, &byeRequestsJSON,
 			&p.PaymentStatus, &p.PaymentReference,
@@ -600,7 +600,7 @@ func (r *PostgresRepository) GetStandings(ctx context.Context, tournamentID uuid
 		SELECT
 			tp.id, tp.tournament_id, tp.section_id, tp.player_id,
 			tp.registration_status, tp.registered_at,
-			tp.start_rank, tp.starting_rating,
+			tp.start_rank, tp.starting_rating, tp.manual_rating_override,
 			tp.points, tp.buchholz, tp.buchholz_cut1, tp.sonneborn_berger,
 			tp.wins, tp.draws, tp.losses, tp.is_active, tp.bye_requests,
 			tp.payment_status, tp.payment_reference,
@@ -626,7 +626,7 @@ func (r *PostgresRepository) GetStandings(ctx context.Context, tournamentID uuid
 		err := rows.Scan(
 			&p.ID, &p.TournamentID, &p.SectionID, &p.PlayerID,
 			&p.RegistrationStatus, &p.RegisteredAt,
-			&p.StartRank, &p.StartingRating,
+			&p.StartRank, &p.StartingRating, &p.ManualRatingOverride,
 			&p.Points, &p.Buchholz, &p.BuchholzCut1, &p.SonnebornBerger,
 			&p.Wins, &p.Draws, &p.Losses, &p.IsActive, &byeRequestsJSON,
 			&p.PaymentStatus, &p.PaymentReference,

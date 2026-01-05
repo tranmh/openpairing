@@ -418,6 +418,20 @@ func (s *Service) StartTournament(ctx context.Context, id uuid.UUID) (*Tournamen
 		return nil, err
 	}
 
+	// Auto-lock ratings if setting is enabled (default: true)
+	autoLockRatings := true // default
+	if tournament.Settings != nil {
+		if val, ok := tournament.Settings["auto_lock_ratings"].(bool); ok {
+			autoLockRatings = val
+		}
+	}
+
+	if autoLockRatings && tournament.RatingsLockedAt == nil {
+		if err := s.LockRatings(ctx, id); err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to auto-lock ratings at tournament start")
+		}
+	}
+
 	// Create first round
 	round := &Round{
 		ID:           uuid.New(),
@@ -569,7 +583,7 @@ func (s *Service) GetParticipants(ctx context.Context, tournamentID uuid.UUID, f
 	return participants, nil
 }
 
-// AssignStartRanks assigns start ranks based on rating
+// AssignStartRanks assigns start ranks based on effective rating (ManualOverride or StartingRating)
 func (s *Service) AssignStartRanks(ctx context.Context, tournamentID uuid.UUID) error {
 	participants, err := s.GetParticipants(ctx, tournamentID, &ParticipantFilter{
 		ActiveOnly: true,
@@ -578,10 +592,10 @@ func (s *Service) AssignStartRanks(ctx context.Context, tournamentID uuid.UUID) 
 		return err
 	}
 
-	// Sort by rating descending
+	// Sort by effective rating descending
 	for i := 0; i < len(participants); i++ {
 		for j := i + 1; j < len(participants); j++ {
-			if participants[j].StartingRating > participants[i].StartingRating {
+			if participants[j].EffectiveRating() > participants[i].EffectiveRating() {
 				participants[i], participants[j] = participants[j], participants[i]
 			}
 		}
@@ -608,6 +622,21 @@ func (s *Service) GeneratePairings(ctx context.Context, tournamentID uuid.UUID, 
 	if tournament.Status != StatusOngoing {
 		return nil, fmt.Errorf("tournament is not ongoing")
 	}
+
+	// Set pairing lock to prevent result entry during pairing generation
+	previousStatus := tournament.Status
+	tournament.Status = StatusPairing
+	if err := s.repo.Update(ctx, tournament); err != nil {
+		return nil, fmt.Errorf("failed to set pairing lock: %w", err)
+	}
+
+	// Ensure we unlock on exit (both success and error)
+	defer func() {
+		tournament.Status = previousStatus
+		if updateErr := s.repo.Update(ctx, tournament); updateErr != nil {
+			s.logger.Error().Err(updateErr).Msg("Failed to release pairing lock")
+		}
+	}()
 
 	// Get the round
 	round, err := s.repo.GetRoundByNumber(ctx, tournamentID, roundNumber)
@@ -793,7 +822,7 @@ func (s *Service) generateTRFForPairing(ctx context.Context, tournament *Tournam
 		player := trf.TRFPlayer{
 			StartNo:    p.StartRank,
 			Name:       playerName,
-			Rating:     p.StartingRating,
+			Rating:     p.EffectiveRating(),
 			FideID:     fideID,
 			Points:     p.Points,
 			Rank:       p.StartRank,
@@ -925,6 +954,15 @@ func (s *Service) EnterResult(ctx context.Context, gameID uuid.UUID, req *EnterR
 	game, err := s.repo.GetGame(ctx, gameID)
 	if err != nil {
 		return nil, err
+	}
+
+	// Check if tournament is locked for pairing
+	tournament, err := s.repo.GetByID(ctx, game.TournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tournament: %w", err)
+	}
+	if tournament.Status == StatusPairing {
+		return nil, fmt.Errorf("tournament is locked for pairing - results cannot be entered")
 	}
 
 	if game.Status == GameStatusCompleted && game.Result != nil && *game.Result != "" {
@@ -1134,7 +1172,7 @@ func (s *Service) RecalculateTiebreaks(ctx context.Context, tournamentID uuid.UU
 		playerData := &tiebreak.PlayerData{
 			ID:           p.ID,
 			StartRank:    p.StartRank,
-			Rating:       p.StartingRating,
+			Rating:       p.EffectiveRating(),
 			Points:       p.Points,
 			Wins:         p.Wins,
 			Draws:        p.Draws,
@@ -1257,7 +1295,7 @@ func (s *Service) GetCrosstable(ctx context.Context, tournamentID uuid.UUID) (*C
 			ParticipantID:  p.ID,
 			PlayerID:       p.PlayerID,
 			Name:           name,
-			Rating:         p.StartingRating,
+			Rating:         p.EffectiveRating(),
 			Points:         p.Points,
 			Buchholz:       p.Buchholz,
 			SonnebornBerger: p.SonnebornBerger,
@@ -1541,7 +1579,7 @@ func (s *Service) generateBuiltInPairings(ctx context.Context, tournament *Tourn
 		player := engine.Player{
 			StartNo:  p.StartRank,
 			Name:     name,
-			Rating:   p.StartingRating,
+			Rating:   p.EffectiveRating(),
 			Points:   p.Points,
 			IsActive: p.IsActive,
 		}
@@ -1696,4 +1734,106 @@ func (s *Service) generateSwissPairings(ctx context.Context, tournament *Tournam
 	}
 
 	return s.pairingEngine.GeneratePairings(ctx, pairingReq)
+}
+
+// LockRatings locks the ratings for a tournament by refreshing all participant ratings
+// from the current player profile and marking the tournament as ratings locked.
+func (s *Service) LockRatings(ctx context.Context, tournamentID uuid.UUID) error {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return err
+	}
+
+	// Only allow locking for non-completed tournaments
+	if tournament.Status == StatusCompleted || tournament.Status == StatusCancelled {
+		return fmt.Errorf("cannot lock ratings for %s tournament", tournament.Status)
+	}
+
+	// Already locked?
+	if tournament.RatingsLockedAt != nil {
+		s.logger.Info().
+			Str("tournament_id", tournamentID.String()).
+			Time("locked_at", *tournament.RatingsLockedAt).
+			Msg("Ratings already locked")
+		return nil
+	}
+
+	participants, err := s.repo.ListParticipants(ctx, tournamentID)
+	if err != nil {
+		return fmt.Errorf("failed to list participants: %w", err)
+	}
+
+	// Determine rating type based on time control
+	ratingType := s.getRatingType(tournament.TimeControlType)
+
+	// Refresh each participant's starting rating from current player profile
+	for i := range participants {
+		currentRating, err := s.repo.GetPlayerRating(ctx, participants[i].PlayerID, ratingType)
+		if err != nil {
+			s.logger.Warn().
+				Err(err).
+				Str("player_id", participants[i].PlayerID.String()).
+				Msg("Failed to fetch current rating, keeping existing")
+			continue
+		}
+
+		if currentRating > 0 {
+			participants[i].StartingRating = currentRating
+			if err := s.repo.UpdateParticipant(ctx, &participants[i]); err != nil {
+				return fmt.Errorf("failed to update participant rating: %w", err)
+			}
+		}
+	}
+
+	// Mark tournament as ratings locked
+	now := time.Now()
+	tournament.RatingsLockedAt = &now
+	if err := s.repo.Update(ctx, tournament); err != nil {
+		return fmt.Errorf("failed to update tournament: %w", err)
+	}
+
+	s.logger.Info().
+		Str("tournament_id", tournamentID.String()).
+		Int("participants", len(participants)).
+		Msg("Ratings locked")
+
+	return nil
+}
+
+// getRatingType returns the rating type based on time control
+func (s *Service) getRatingType(timeControlType TimeControlType) string {
+	switch timeControlType {
+	case TimeControlRapid:
+		return "rapid"
+	case TimeControlBlitz:
+		return "blitz"
+	default:
+		return "standard"
+	}
+}
+
+// SetParticipantRatingOverride sets or clears a manual rating override for a participant
+func (s *Service) SetParticipantRatingOverride(ctx context.Context, participantID uuid.UUID, rating *int) error {
+	participant, err := s.repo.GetParticipant(ctx, participantID)
+	if err != nil {
+		return err
+	}
+
+	participant.ManualRatingOverride = rating
+	if err := s.repo.UpdateParticipant(ctx, participant); err != nil {
+		return fmt.Errorf("failed to update participant: %w", err)
+	}
+
+	if rating != nil {
+		s.logger.Info().
+			Str("participant_id", participantID.String()).
+			Int("rating_override", *rating).
+			Msg("Rating override set")
+	} else {
+		s.logger.Info().
+			Str("participant_id", participantID.String()).
+			Msg("Rating override cleared")
+	}
+
+	return nil
 }
