@@ -165,11 +165,12 @@ func (w *WAM) assignSequential(players []Player, groups []WAMGroup, groupSize in
 		}
 
 		groups[groupIdx].Players = append(groups[groupIdx].Players, WAMGroupPlayer{
-			ID:        uuid.New(),
-			GroupID:   groups[groupIdx].ID,
-			Name:      player.Name,
-			Rating:    player.Rating,
-			SortOrder: len(groups[groupIdx].Players) + 1,
+			ID:            uuid.New(),
+			GroupID:       groups[groupIdx].ID,
+			Name:          player.Name,
+			Rating:        player.Rating,
+			SortOrder:     len(groups[groupIdx].Players) + 1,
+			OriginalIndex: player.StartNo - 1, // Convert 1-indexed StartNo to 0-indexed
 		})
 	}
 }
@@ -202,11 +203,12 @@ func (w *WAM) assignSerpentine(players []Player, groups []WAMGroup, groupSize in
 		}
 
 		groups[groupIdx].Players = append(groups[groupIdx].Players, WAMGroupPlayer{
-			ID:        uuid.New(),
-			GroupID:   groups[groupIdx].ID,
-			Name:      player.Name,
-			Rating:    player.Rating,
-			SortOrder: len(groups[groupIdx].Players) + 1,
+			ID:            uuid.New(),
+			GroupID:       groups[groupIdx].ID,
+			Name:          player.Name,
+			Rating:        player.Rating,
+			SortOrder:     len(groups[groupIdx].Players) + 1,
+			OriginalIndex: player.StartNo - 1, // Convert 1-indexed StartNo to 0-indexed
 		})
 
 		// Move to next group in serpentine pattern

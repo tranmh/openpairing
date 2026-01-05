@@ -70,7 +70,8 @@ type WAMGroupPlayer struct {
 	ClubID         *uuid.UUID `json:"clubId,omitempty"`
 	ClubName       *string    `json:"clubName,omitempty"`
 	BirthDate      *time.Time `json:"birthDate,omitempty"`
-	SortOrder      int        `json:"sortOrder"` // Position within group (1-indexed)
+	SortOrder      int        `json:"sortOrder"`      // Position within group (1-indexed)
+	OriginalIndex  int        `json:"originalIndex"`  // Index in original participants array (0-indexed)
 	Points         float64    `json:"points"`
 	Wins           int        `json:"wins"`
 	Draws          int        `json:"draws"`

@@ -156,32 +156,11 @@ func (s *Service) AssignGroups(ctx context.Context, tournamentID uuid.UUID, req 
 
 		// Add members
 		for j, ep := range eg.Players {
-			// Find matching participant
+			// Use OriginalIndex to map back to original participant
+			// OriginalIndex is 0-indexed, set by the engine from player.StartNo - 1
 			var participantID uuid.UUID
-			if j < len(participants) {
-				// Map based on assignment order
-				switch config.AssignmentMethod {
-				case engine.WAMAssignmentSequential:
-					idx := (i * config.GroupSize) + j
-					if idx < len(participants) {
-						participantID = participants[idx].ParticipantID
-					}
-				case engine.WAMAssignmentSerpentine:
-					// For serpentine, the engine already assigned correctly
-					// We need to find the participant by name/rating match
-					for _, p := range participants {
-						if p.Name == ep.Name && p.Rating == ep.Rating {
-							participantID = p.ParticipantID
-							break
-						}
-					}
-				case engine.WAMAssignmentRandom:
-					// Already shuffled, use same logic as sequential
-					idx := (i * config.GroupSize) + j
-					if idx < len(participants) {
-						participantID = participants[idx].ParticipantID
-					}
-				}
+			if ep.OriginalIndex >= 0 && ep.OriginalIndex < len(participants) {
+				participantID = participants[ep.OriginalIndex].ParticipantID
 			}
 
 			if participantID != uuid.Nil {
