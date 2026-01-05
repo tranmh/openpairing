@@ -54,6 +54,7 @@ type Repository interface {
 	CreateGames(ctx context.Context, games []Game) error
 	GetGame(ctx context.Context, id uuid.UUID) (*Game, error)
 	UpdateGame(ctx context.Context, g *Game) error
+	DeleteGame(ctx context.Context, id uuid.UUID) error
 	ListGamesByRound(ctx context.Context, roundID uuid.UUID) ([]Game, error)
 	ListGamesByTournament(ctx context.Context, tournamentID uuid.UUID) ([]Game, error)
 	GetPlayerGames(ctx context.Context, tournamentID, participantID uuid.UUID) ([]Game, error)
@@ -62,6 +63,13 @@ type Repository interface {
 	AddForbiddenPair(ctx context.Context, fp *ForbiddenPair) error
 	ListForbiddenPairs(ctx context.Context, tournamentID uuid.UUID) ([]ForbiddenPair, error)
 	RemoveForbiddenPair(ctx context.Context, id uuid.UUID) error
+
+	// Special Rankings
+	CreateSpecialRanking(ctx context.Context, sr *SpecialRanking) error
+	GetSpecialRanking(ctx context.Context, id uuid.UUID) (*SpecialRanking, error)
+	UpdateSpecialRanking(ctx context.Context, sr *SpecialRanking) error
+	DeleteSpecialRanking(ctx context.Context, id uuid.UUID) error
+	ListSpecialRankings(ctx context.Context, tournamentID uuid.UUID) ([]SpecialRanking, error)
 
 	// Player lookup
 	GetPlayerRating(ctx context.Context, playerID uuid.UUID, ratingType string) (int, error)
@@ -961,6 +969,17 @@ func (r *PostgresRepository) UpdateGame(ctx context.Context, g *Game) error {
 	return nil
 }
 
+func (r *PostgresRepository) DeleteGame(ctx context.Context, id uuid.UUID) error {
+	result, err := r.db.Exec(ctx, "DELETE FROM games WHERE id = $1", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete game: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrGameNotFound
+	}
+	return nil
+}
+
 func (r *PostgresRepository) ListGamesByRound(ctx context.Context, roundID uuid.UUID) ([]Game, error) {
 	query := `
 		SELECT
@@ -1133,6 +1152,118 @@ func (r *PostgresRepository) ListForbiddenPairs(ctx context.Context, tournamentI
 func (r *PostgresRepository) RemoveForbiddenPair(ctx context.Context, id uuid.UUID) error {
 	_, err := r.db.Exec(ctx, "DELETE FROM forbidden_pairs WHERE id = $1", id)
 	return err
+}
+
+// CreateSpecialRanking creates a new special ranking
+func (r *PostgresRepository) CreateSpecialRanking(ctx context.Context, sr *SpecialRanking) error {
+	if sr.ID == uuid.Nil {
+		sr.ID = uuid.New()
+	}
+	sr.CreatedAt = time.Now()
+	sr.UpdatedAt = time.Now()
+
+	query := `
+		INSERT INTO special_rankings (
+			id, tournament_id, name, display_name,
+			min_birth_year, max_birth_year, min_rating, max_rating, gender,
+			sort_order, is_active, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
+
+	_, err := r.db.Exec(ctx, query,
+		sr.ID, sr.TournamentID, sr.Name, sr.DisplayName,
+		sr.MinBirthYear, sr.MaxBirthYear, sr.MinRating, sr.MaxRating, sr.Gender,
+		sr.SortOrder, sr.IsActive, sr.CreatedAt, sr.UpdatedAt,
+	)
+	return err
+}
+
+// GetSpecialRanking gets a special ranking by ID
+func (r *PostgresRepository) GetSpecialRanking(ctx context.Context, id uuid.UUID) (*SpecialRanking, error) {
+	query := `
+		SELECT id, tournament_id, name, display_name,
+			min_birth_year, max_birth_year, min_rating, max_rating, gender,
+			sort_order, is_active, created_at, updated_at
+		FROM special_rankings WHERE id = $1`
+
+	var sr SpecialRanking
+	err := r.db.QueryRow(ctx, query, id).Scan(
+		&sr.ID, &sr.TournamentID, &sr.Name, &sr.DisplayName,
+		&sr.MinBirthYear, &sr.MaxBirthYear, &sr.MinRating, &sr.MaxRating, &sr.Gender,
+		&sr.SortOrder, &sr.IsActive, &sr.CreatedAt, &sr.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &sr, nil
+}
+
+// UpdateSpecialRanking updates a special ranking
+func (r *PostgresRepository) UpdateSpecialRanking(ctx context.Context, sr *SpecialRanking) error {
+	sr.UpdatedAt = time.Now()
+
+	query := `
+		UPDATE special_rankings SET
+			name = $2, display_name = $3,
+			min_birth_year = $4, max_birth_year = $5,
+			min_rating = $6, max_rating = $7, gender = $8,
+			sort_order = $9, is_active = $10, updated_at = $11
+		WHERE id = $1`
+
+	result, err := r.db.Exec(ctx, query,
+		sr.ID, sr.Name, sr.DisplayName,
+		sr.MinBirthYear, sr.MaxBirthYear, sr.MinRating, sr.MaxRating, sr.Gender,
+		sr.SortOrder, sr.IsActive, sr.UpdatedAt,
+	)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("special ranking not found")
+	}
+	return nil
+}
+
+// DeleteSpecialRanking deletes a special ranking
+func (r *PostgresRepository) DeleteSpecialRanking(ctx context.Context, id uuid.UUID) error {
+	result, err := r.db.Exec(ctx, "DELETE FROM special_rankings WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("special ranking not found")
+	}
+	return nil
+}
+
+// ListSpecialRankings lists all special rankings for a tournament
+func (r *PostgresRepository) ListSpecialRankings(ctx context.Context, tournamentID uuid.UUID) ([]SpecialRanking, error) {
+	query := `
+		SELECT id, tournament_id, name, display_name,
+			min_birth_year, max_birth_year, min_rating, max_rating, gender,
+			sort_order, is_active, created_at, updated_at
+		FROM special_rankings
+		WHERE tournament_id = $1
+		ORDER BY sort_order, name`
+
+	rows, err := r.db.Query(ctx, query, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rankings []SpecialRanking
+	for rows.Next() {
+		var sr SpecialRanking
+		if err := rows.Scan(
+			&sr.ID, &sr.TournamentID, &sr.Name, &sr.DisplayName,
+			&sr.MinBirthYear, &sr.MaxBirthYear, &sr.MinRating, &sr.MaxRating, &sr.Gender,
+			&sr.SortOrder, &sr.IsActive, &sr.CreatedAt, &sr.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		rankings = append(rankings, sr)
+	}
+	return rankings, nil
 }
 
 // GetPlayerRating fetches a player's rating from the players table

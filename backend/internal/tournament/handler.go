@@ -116,6 +116,12 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 			organizer.GET("/:id/forbidden-pairs", h.GetForbiddenPairs)
 			organizer.POST("/:id/forbidden-pairs", h.AddForbiddenPair)
 			organizer.DELETE("/:id/forbidden-pairs/:pairId", h.RemoveForbiddenPair)
+
+			// Special Rankings (organizer only)
+			organizer.GET("/:id/special-rankings", h.ListSpecialRankings)
+			organizer.POST("/:id/special-rankings", h.CreateSpecialRanking)
+			organizer.PUT("/:id/special-rankings/:rankingId", h.UpdateSpecialRanking)
+			organizer.DELETE("/:id/special-rankings/:rankingId", h.DeleteSpecialRanking)
 		}
 	}
 }
@@ -937,6 +943,149 @@ func (h *Handler) RemoveForbiddenPair(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// ListSpecialRankings lists special rankings for a tournament
+// @Summary List special rankings
+// @Tags tournaments
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Success 200 {object} SpecialRankingsResponse
+// @Router /tournaments/{id}/special-rankings [get]
+func (h *Handler) ListSpecialRankings(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	rankings, err := h.service.ListSpecialRankings(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, SpecialRankingsResponse{Rankings: rankings})
+}
+
+// CreateSpecialRanking creates a new special ranking
+// @Summary Create special ranking
+// @Tags tournaments
+// @Accept json
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param request body CreateSpecialRankingRequest true "Special ranking data"
+// @Success 201 {object} SpecialRankingResponse
+// @Router /tournaments/{id}/special-rankings [post]
+func (h *Handler) CreateSpecialRanking(c *gin.Context) {
+	tournamentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	var req CreateSpecialRankingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	sr := &SpecialRanking{
+		TournamentID: tournamentID,
+		Name:         req.Name,
+		DisplayName:  req.DisplayName,
+		MinBirthYear: req.MinBirthYear,
+		MaxBirthYear: req.MaxBirthYear,
+		MinRating:    req.MinRating,
+		MaxRating:    req.MaxRating,
+		Gender:       req.Gender,
+		SortOrder:    req.SortOrder,
+		IsActive:     true,
+	}
+
+	if err := h.service.CreateSpecialRanking(c.Request.Context(), sr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, SpecialRankingResponse{Ranking: sr})
+}
+
+// UpdateSpecialRanking updates a special ranking
+// @Summary Update special ranking
+// @Tags tournaments
+// @Accept json
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param rankingId path string true "Ranking ID"
+// @Param request body UpdateSpecialRankingRequest true "Special ranking data"
+// @Success 200 {object} SpecialRankingResponse
+// @Router /tournaments/{id}/special-rankings/{rankingId} [put]
+func (h *Handler) UpdateSpecialRanking(c *gin.Context) {
+	rankingID, err := uuid.Parse(c.Param("rankingId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ranking ID"})
+		return
+	}
+
+	var req UpdateSpecialRankingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	sr, err := h.service.GetSpecialRanking(c.Request.Context(), rankingID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "special ranking not found"})
+		return
+	}
+
+	if req.Name != nil {
+		sr.Name = *req.Name
+	}
+	if req.DisplayName != nil {
+		sr.DisplayName = *req.DisplayName
+	}
+	sr.MinBirthYear = req.MinBirthYear
+	sr.MaxBirthYear = req.MaxBirthYear
+	sr.MinRating = req.MinRating
+	sr.MaxRating = req.MaxRating
+	sr.Gender = req.Gender
+	if req.SortOrder != nil {
+		sr.SortOrder = *req.SortOrder
+	}
+	if req.IsActive != nil {
+		sr.IsActive = *req.IsActive
+	}
+
+	if err := h.service.UpdateSpecialRanking(c.Request.Context(), sr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, SpecialRankingResponse{Ranking: sr})
+}
+
+// DeleteSpecialRanking deletes a special ranking
+// @Summary Delete special ranking
+// @Tags tournaments
+// @Param id path string true "Tournament ID"
+// @Param rankingId path string true "Ranking ID"
+// @Success 204
+// @Router /tournaments/{id}/special-rankings/{rankingId} [delete]
+func (h *Handler) DeleteSpecialRanking(c *gin.Context) {
+	rankingID, err := uuid.Parse(c.Param("rankingId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ranking ID"})
+		return
+	}
+
+	if err := h.service.DeleteSpecialRanking(c.Request.Context(), rankingID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 // LockRatings locks ratings for a tournament
 // @Summary Lock ratings
 // @Tags tournaments
@@ -1376,6 +1525,16 @@ type ForbiddenPairsResponse struct {
 	ForbiddenPairs []ForbiddenPair `json:"forbiddenPairs"`
 }
 
+// SpecialRankingsResponse wraps special rankings
+type SpecialRankingsResponse struct {
+	Rankings []SpecialRanking `json:"rankings"`
+}
+
+// SpecialRankingResponse wraps a single special ranking
+type SpecialRankingResponse struct {
+	Ranking *SpecialRanking `json:"ranking"`
+}
+
 // Request types
 
 // AddForbiddenPairRequest for adding a forbidden pair
@@ -1383,6 +1542,31 @@ type AddForbiddenPairRequest struct {
 	Player1ID uuid.UUID `json:"player1Id" binding:"required"`
 	Player2ID uuid.UUID `json:"player2Id" binding:"required"`
 	Reason    string    `json:"reason"`
+}
+
+// CreateSpecialRankingRequest for creating a special ranking
+type CreateSpecialRankingRequest struct {
+	Name         string  `json:"name" binding:"required"`
+	DisplayName  string  `json:"displayName" binding:"required"`
+	MinBirthYear *int    `json:"minBirthYear,omitempty"`
+	MaxBirthYear *int    `json:"maxBirthYear,omitempty"`
+	MinRating    *int    `json:"minRating,omitempty"`
+	MaxRating    *int    `json:"maxRating,omitempty"`
+	Gender       *string `json:"gender,omitempty"`
+	SortOrder    int     `json:"sortOrder"`
+}
+
+// UpdateSpecialRankingRequest for updating a special ranking
+type UpdateSpecialRankingRequest struct {
+	Name         *string `json:"name,omitempty"`
+	DisplayName  *string `json:"displayName,omitempty"`
+	MinBirthYear *int    `json:"minBirthYear,omitempty"`
+	MaxBirthYear *int    `json:"maxBirthYear,omitempty"`
+	MinRating    *int    `json:"minRating,omitempty"`
+	MaxRating    *int    `json:"maxRating,omitempty"`
+	Gender       *string `json:"gender,omitempty"`
+	SortOrder    *int    `json:"sortOrder,omitempty"`
+	IsActive     *bool   `json:"isActive,omitempty"`
 }
 
 // EnterResultRequest for entering a game result

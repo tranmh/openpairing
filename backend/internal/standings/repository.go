@@ -236,6 +236,80 @@ func (r *Repository) GetOpponentRatings(ctx context.Context, tournamentID, parti
 	return ratings, rows.Err()
 }
 
+// ParticipantEligibilityData contains data needed for special ranking eligibility
+type ParticipantEligibilityData struct {
+	ParticipantID uuid.UUID
+	BirthYear     int
+	Rating        int
+	Gender        string
+}
+
+// SpecialRankingData contains special ranking definition for standings
+type SpecialRankingData struct {
+	ID           uuid.UUID
+	Name         string
+	DisplayName  string
+	MinBirthYear *int
+	MaxBirthYear *int
+	MinRating    *int
+	MaxRating    *int
+	Gender       *string
+}
+
+// GetSpecialRankings retrieves active special rankings for a tournament
+func (r *Repository) GetSpecialRankings(ctx context.Context, tournamentID uuid.UUID) ([]SpecialRankingData, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, name, display_name, min_birth_year, max_birth_year, min_rating, max_rating, gender
+		FROM special_rankings
+		WHERE tournament_id = $1 AND is_active = true
+		ORDER BY sort_order, name
+	`, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query special rankings: %w", err)
+	}
+	defer rows.Close()
+
+	var rankings []SpecialRankingData
+	for rows.Next() {
+		var sr SpecialRankingData
+		if err := rows.Scan(&sr.ID, &sr.Name, &sr.DisplayName, &sr.MinBirthYear, &sr.MaxBirthYear, &sr.MinRating, &sr.MaxRating, &sr.Gender); err != nil {
+			return nil, fmt.Errorf("failed to scan special ranking: %w", err)
+		}
+		rankings = append(rankings, sr)
+	}
+
+	return rankings, rows.Err()
+}
+
+// GetParticipantEligibilityData retrieves eligibility data for all participants
+func (r *Repository) GetParticipantEligibilityData(ctx context.Context, tournamentID uuid.UUID) (map[uuid.UUID]ParticipantEligibilityData, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			tp.id,
+			COALESCE(EXTRACT(YEAR FROM p.birth_date::date), 0)::int as birth_year,
+			COALESCE(tp.starting_rating, 0) as rating,
+			COALESCE(p.gender, '') as gender
+		FROM tournament_participants tp
+		JOIN players p ON p.id = tp.player_id
+		WHERE tp.tournament_id = $1
+	`, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query eligibility data: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[uuid.UUID]ParticipantEligibilityData)
+	for rows.Next() {
+		var data ParticipantEligibilityData
+		if err := rows.Scan(&data.ParticipantID, &data.BirthYear, &data.Rating, &data.Gender); err != nil {
+			return nil, fmt.Errorf("failed to scan eligibility data: %w", err)
+		}
+		result[data.ParticipantID] = data
+	}
+
+	return result, rows.Err()
+}
+
 // UpdateParticipantTiebreaks updates the denormalized tiebreak values for a participant
 func (r *Repository) UpdateParticipantTiebreaks(ctx context.Context, participantID uuid.UUID, buchholz, buchholzCut1, sonnebornBerger float64) error {
 	_, err := r.db.Exec(ctx, `

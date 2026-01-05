@@ -173,6 +173,32 @@ func (m *MockByeRepository) GetTeams(ctx context.Context, tournamentID uuid.UUID
 	panic("not implemented")
 }
 
+// Special Rankings
+func (m *MockByeRepository) CreateSpecialRanking(ctx context.Context, sr *SpecialRanking) error {
+	panic("not implemented")
+}
+
+func (m *MockByeRepository) GetSpecialRanking(ctx context.Context, id uuid.UUID) (*SpecialRanking, error) {
+	panic("not implemented")
+}
+
+func (m *MockByeRepository) UpdateSpecialRanking(ctx context.Context, sr *SpecialRanking) error {
+	panic("not implemented")
+}
+
+func (m *MockByeRepository) DeleteSpecialRanking(ctx context.Context, id uuid.UUID) error {
+	panic("not implemented")
+}
+
+func (m *MockByeRepository) ListSpecialRankings(ctx context.Context, tournamentID uuid.UUID) ([]SpecialRanking, error) {
+	panic("not implemented")
+}
+
+// Games
+func (m *MockByeRepository) DeleteGame(ctx context.Context, id uuid.UUID) error {
+	panic("not implemented")
+}
+
 // itoa converts int to string without importing strconv
 func itoa(n int) string {
 	if n == 0 {

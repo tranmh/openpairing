@@ -6,24 +6,33 @@ import (
 	"github.com/google/uuid"
 )
 
+// EligibleRanking represents a special ranking a player is eligible for
+type EligibleRanking struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	DisplayName string    `json:"displayName"`
+	RankInGroup int       `json:"rankInGroup"`
+}
+
 // Standing represents a player's position in the standings
 type Standing struct {
-	Rank             int       `json:"rank"`
-	ParticipantID    uuid.UUID `json:"participantId"`
-	PlayerID         uuid.UUID `json:"playerId"`
-	PlayerName       string    `json:"playerName"`
-	PlayerFideID     *string   `json:"playerFideId,omitempty"`
-	PlayerTitle      *string   `json:"playerTitle,omitempty"`
-	ClubName         *string   `json:"clubName,omitempty"`
-	Rating           int       `json:"rating"`
-	Points           float64   `json:"points"`
-	GamesPlayed      int       `json:"gamesPlayed"`
-	Wins             int       `json:"wins"`
-	Draws            int       `json:"draws"`
-	Losses           int       `json:"losses"`
-	Tiebreaks        map[string]float64 `json:"tiebreaks"`
-	IsActive         bool      `json:"isActive"`
-	PerformanceRating *int     `json:"performanceRating,omitempty"`
+	Rank              int                `json:"rank"`
+	ParticipantID     uuid.UUID          `json:"participantId"`
+	PlayerID          uuid.UUID          `json:"playerId"`
+	PlayerName        string             `json:"playerName"`
+	PlayerFideID      *string            `json:"playerFideId,omitempty"`
+	PlayerTitle       *string            `json:"playerTitle,omitempty"`
+	ClubName          *string            `json:"clubName,omitempty"`
+	Rating            int                `json:"rating"`
+	Points            float64            `json:"points"`
+	GamesPlayed       int                `json:"gamesPlayed"`
+	Wins              int                `json:"wins"`
+	Draws             int                `json:"draws"`
+	Losses            int                `json:"losses"`
+	Tiebreaks         map[string]float64 `json:"tiebreaks"`
+	IsActive          bool               `json:"isActive"`
+	PerformanceRating *int               `json:"performanceRating,omitempty"`
+	EligibleRankings  []EligibleRanking  `json:"eligibleRankings,omitempty"`
 }
 
 // StandingsResponse represents the full standings for a tournament

@@ -988,6 +988,47 @@ type ForbiddenPair struct {
 	CreatedAt    time.Time `json:"createdAt" db:"created_at"`
 }
 
+// SpecialRanking represents a special ranking category (Sonderwertung) for prize eligibility
+type SpecialRanking struct {
+	ID           uuid.UUID `json:"id" db:"id"`
+	TournamentID uuid.UUID `json:"tournamentId" db:"tournament_id"`
+	Name         string    `json:"name" db:"name"`               // Internal code: "u12", "seniors", "women"
+	DisplayName  string    `json:"displayName" db:"display_name"` // "U12 Wertung", "Seniorenwertung"
+
+	// Filter criteria (nil = no filter on this criterion)
+	MinBirthYear *int    `json:"minBirthYear,omitempty" db:"min_birth_year"`
+	MaxBirthYear *int    `json:"maxBirthYear,omitempty" db:"max_birth_year"`
+	MinRating    *int    `json:"minRating,omitempty" db:"min_rating"`
+	MaxRating    *int    `json:"maxRating,omitempty" db:"max_rating"`
+	Gender       *string `json:"gender,omitempty" db:"gender"`
+
+	SortOrder int  `json:"sortOrder" db:"sort_order"`
+	IsActive  bool `json:"isActive" db:"is_active"`
+
+	CreatedAt time.Time `json:"createdAt" db:"created_at"`
+	UpdatedAt time.Time `json:"updatedAt" db:"updated_at"`
+}
+
+// IsEligible checks if a player qualifies for this special ranking
+func (sr *SpecialRanking) IsEligible(birthYear int, rating int, gender string) bool {
+	if sr.MinBirthYear != nil && birthYear < *sr.MinBirthYear {
+		return false
+	}
+	if sr.MaxBirthYear != nil && birthYear > *sr.MaxBirthYear {
+		return false
+	}
+	if sr.MinRating != nil && rating < *sr.MinRating {
+		return false
+	}
+	if sr.MaxRating != nil && rating > *sr.MaxRating {
+		return false
+	}
+	if sr.Gender != nil && *sr.Gender != "" && gender != *sr.Gender {
+		return false
+	}
+	return true
+}
+
 // Team represents a team in a team tournament
 type Team struct {
 	ID           int       `json:"id" db:"id"`

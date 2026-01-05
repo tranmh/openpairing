@@ -1538,6 +1538,31 @@ func (s *Service) GetForbiddenPairs(ctx context.Context, tournamentID uuid.UUID)
 	return s.repo.ListForbiddenPairs(ctx, tournamentID)
 }
 
+// CreateSpecialRanking creates a new special ranking
+func (s *Service) CreateSpecialRanking(ctx context.Context, sr *SpecialRanking) error {
+	return s.repo.CreateSpecialRanking(ctx, sr)
+}
+
+// GetSpecialRanking gets a special ranking by ID
+func (s *Service) GetSpecialRanking(ctx context.Context, id uuid.UUID) (*SpecialRanking, error) {
+	return s.repo.GetSpecialRanking(ctx, id)
+}
+
+// UpdateSpecialRanking updates a special ranking
+func (s *Service) UpdateSpecialRanking(ctx context.Context, sr *SpecialRanking) error {
+	return s.repo.UpdateSpecialRanking(ctx, sr)
+}
+
+// DeleteSpecialRanking deletes a special ranking
+func (s *Service) DeleteSpecialRanking(ctx context.Context, id uuid.UUID) error {
+	return s.repo.DeleteSpecialRanking(ctx, id)
+}
+
+// ListSpecialRankings lists all special rankings for a tournament
+func (s *Service) ListSpecialRankings(ctx context.Context, tournamentID uuid.UUID) ([]SpecialRanking, error) {
+	return s.repo.ListSpecialRankings(ctx, tournamentID)
+}
+
 // generateBuiltInPairings generates pairings using built-in engines (RoundRobin, Knockout, Scheveningen, Arena)
 func (s *Service) generateBuiltInPairings(ctx context.Context, tournament *Tournament, participants []Participant, roundNumber int) (*engine.PairingResult, error) {
 	if s.engineRegistry == nil {

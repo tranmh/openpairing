@@ -353,6 +353,112 @@ func floatPtr(f float64) *float64 {
 	return &f
 }
 
+// ReactivatePlayerRequest contains data for reactivating a withdrawn player
+type ReactivatePlayerRequest struct {
+	TournamentID      uuid.UUID `json:"tournamentId"`
+	ParticipantID     uuid.UUID `json:"participantId"`
+	MissedRoundPoints float64   `json:"missedRoundPoints"` // Points per missed round (0 = keep existing score)
+	Reason            string    `json:"reason"`
+}
+
+// ReactivatePlayer reactivates a withdrawn player
+func (s *Service) ReactivatePlayer(ctx context.Context, req *ReactivatePlayerRequest, arbiterID uuid.UUID) error {
+	// Verify arbiter has permission for this tournament
+	if err := s.canManageTournament(ctx, req.TournamentID, arbiterID); err != nil {
+		return err
+	}
+
+	// Get tournament to check settings
+	tourney, err := s.tournamentRepo.GetByID(ctx, req.TournamentID)
+	if err != nil {
+		return fmt.Errorf("tournament not found: %w", err)
+	}
+
+	// Check if re-entry is allowed
+	if tourney.ByeSettings != nil && !tourney.ByeSettings.Withdrawal.ReentryAllowed {
+		return fmt.Errorf("re-entry is not allowed for this tournament")
+	}
+
+	// Get participant
+	participant, err := s.tournamentRepo.GetParticipant(ctx, req.ParticipantID)
+	if err != nil {
+		return fmt.Errorf("participant not found: %w", err)
+	}
+
+	if participant.TournamentID != req.TournamentID {
+		return fmt.Errorf("participant not in this tournament")
+	}
+
+	if participant.IsActive {
+		return fmt.Errorf("participant is already active")
+	}
+
+	// Get current round
+	rounds, err := s.tournamentRepo.ListRounds(ctx, req.TournamentID)
+	if err != nil {
+		return fmt.Errorf("failed to get rounds: %w", err)
+	}
+
+	currentRound := 0
+	for _, r := range rounds {
+		if r.RoundNumber > currentRound {
+			currentRound = r.RoundNumber
+		}
+	}
+
+	// Check max rounds missed (if configured)
+	if tourney.ByeSettings != nil && tourney.ByeSettings.Withdrawal.ReentryMaxRoundsMissed > 0 {
+		withdrawnRound := 0
+		if participant.WithdrawnRound != nil {
+			withdrawnRound = *participant.WithdrawnRound
+		}
+		roundsMissed := currentRound - withdrawnRound
+		if roundsMissed > tourney.ByeSettings.Withdrawal.ReentryMaxRoundsMissed {
+			return fmt.Errorf("player has missed too many rounds (%d) - maximum allowed is %d",
+				roundsMissed, tourney.ByeSettings.Withdrawal.ReentryMaxRoundsMissed)
+		}
+	}
+
+	// Calculate points for missed rounds if requested
+	if req.MissedRoundPoints > 0 && participant.WithdrawnRound != nil {
+		roundsMissed := currentRound - *participant.WithdrawnRound
+		if roundsMissed > 0 {
+			participant.Points += req.MissedRoundPoints * float64(roundsMissed)
+		}
+	}
+
+	// Reactivate the participant
+	participant.IsActive = true
+	participant.RegistrationStatus = "registered"
+	// Keep WithdrawnRound and WithdrawalReason for audit history
+
+	if err := s.tournamentRepo.UpdateParticipant(ctx, participant); err != nil {
+		return fmt.Errorf("failed to update participant: %w", err)
+	}
+
+	s.logger.Info().
+		Str("tournament_id", req.TournamentID.String()).
+		Str("participant_id", req.ParticipantID.String()).
+		Str("reason", req.Reason).
+		Str("arbiter_id", arbiterID.String()).
+		Msg("Player reactivated by arbiter")
+
+	s.logAudit(ctx, &AuditAction{
+		ID:           uuid.New(),
+		TournamentID: req.TournamentID,
+		ArbiterID:    arbiterID,
+		Action:       "reactivate_player",
+		EntityType:   "participant",
+		EntityID:     req.ParticipantID,
+		OldValue:     "withdrawn",
+		NewValue:     "active",
+		Reason:       req.Reason,
+		CreatedAt:    time.Now(),
+	})
+
+	return nil
+}
+
 // AssignByeRequest contains data for assigning a bye
 type AssignByeRequest struct {
 	TournamentID  uuid.UUID `json:"tournamentId"`
@@ -665,6 +771,258 @@ func (s *Service) SwapPairing(ctx context.Context, req *SwapPairingRequest, arbi
 	})
 
 	return nil
+}
+
+// DeletePairingRequest contains data for deleting a pairing
+type DeletePairingRequest struct {
+	TournamentID uuid.UUID `json:"tournamentId"`
+	GameID       uuid.UUID `json:"gameId"`
+	Reason       string    `json:"reason"`
+}
+
+// DeletePairing deletes a pairing from a round
+func (s *Service) DeletePairing(ctx context.Context, req *DeletePairingRequest, arbiterID uuid.UUID) error {
+	// Verify arbiter has permission for this tournament
+	if err := s.canManageTournament(ctx, req.TournamentID, arbiterID); err != nil {
+		return err
+	}
+
+	game, err := s.tournamentRepo.GetGame(ctx, req.GameID)
+	if err != nil {
+		return fmt.Errorf("game not found: %w", err)
+	}
+
+	if game.TournamentID != req.TournamentID {
+		return fmt.Errorf("game not in this tournament")
+	}
+
+	// Get round to verify status
+	round, err := s.tournamentRepo.GetRound(ctx, game.RoundID)
+	if err != nil {
+		return fmt.Errorf("round not found: %w", err)
+	}
+
+	// Only allow deleting pairings in paired rounds (not ongoing or completed)
+	if round.Status != tournament.RoundStatusPaired && round.Status != tournament.RoundStatusPending {
+		return fmt.Errorf("cannot delete pairing: round is %s", round.Status)
+	}
+
+	// If it was a bye game, reverse the points (bye games have result "BYE")
+	isByeGame := game.BlackParticipantID == nil && game.WhiteParticipantID != nil
+	if isByeGame && game.WhiteScore != nil {
+		white, err := s.tournamentRepo.GetParticipant(ctx, *game.WhiteParticipantID)
+		if err == nil && white != nil {
+			white.Points -= *game.WhiteScore
+			s.tournamentRepo.UpdateParticipant(ctx, white)
+		}
+	} else if game.Result != nil && *game.Result != "" {
+		// For non-bye games, don't allow deletion if result is already entered
+		return fmt.Errorf("cannot delete pairing with result already entered")
+	}
+
+	// Delete the game
+	if err := s.tournamentRepo.DeleteGame(ctx, req.GameID); err != nil {
+		return fmt.Errorf("failed to delete game: %w", err)
+	}
+
+	s.logger.Info().
+		Str("tournament_id", req.TournamentID.String()).
+		Str("game_id", req.GameID.String()).
+		Str("reason", req.Reason).
+		Str("arbiter_id", arbiterID.String()).
+		Msg("Pairing deleted by arbiter")
+
+	s.logAudit(ctx, &AuditAction{
+		ID:           uuid.New(),
+		TournamentID: req.TournamentID,
+		ArbiterID:    arbiterID,
+		Action:       "delete_pairing",
+		EntityType:   "game",
+		EntityID:     req.GameID,
+		Reason:       req.Reason,
+		CreatedAt:    time.Now(),
+	})
+
+	return nil
+}
+
+// CreateManualPairingRequest contains data for creating a manual pairing
+type CreateManualPairingRequest struct {
+	TournamentID       uuid.UUID  `json:"tournamentId"`
+	RoundNumber        int        `json:"roundNumber"`
+	WhiteParticipantID uuid.UUID  `json:"whiteParticipantId"`
+	BlackParticipantID *uuid.UUID `json:"blackParticipantId"` // nil for bye
+	BoardNumber        *int       `json:"boardNumber"`        // auto-assign if nil
+}
+
+// ManualPairingWarning represents a warning about a manual pairing
+type ManualPairingWarning struct {
+	Type    string `json:"type"`    // "forbidden_pair", "previous_encounter"
+	Message string `json:"message"`
+}
+
+// CreateManualPairingResponse contains the result of creating a manual pairing
+type CreateManualPairingResponse struct {
+	GameID   uuid.UUID              `json:"gameId"`
+	Warnings []ManualPairingWarning `json:"warnings"`
+}
+
+// CreateManualPairing creates a manual pairing in a round
+func (s *Service) CreateManualPairing(ctx context.Context, req *CreateManualPairingRequest, arbiterID uuid.UUID) (*CreateManualPairingResponse, error) {
+	// Verify arbiter has permission for this tournament
+	if err := s.canManageTournament(ctx, req.TournamentID, arbiterID); err != nil {
+		return nil, err
+	}
+
+	// Get tournament for scoring settings
+	tourney, err := s.tournamentRepo.GetByID(ctx, req.TournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("tournament not found: %w", err)
+	}
+
+	// Get round
+	round, err := s.tournamentRepo.GetRoundByNumber(ctx, req.TournamentID, req.RoundNumber)
+	if err != nil {
+		return nil, fmt.Errorf("round not found: %w", err)
+	}
+
+	// Only allow creating pairings in pending or paired rounds
+	if round.Status != tournament.RoundStatusPaired && round.Status != tournament.RoundStatusPending {
+		return nil, fmt.Errorf("cannot create pairing: round is %s", round.Status)
+	}
+
+	// Verify white participant exists
+	white, err := s.tournamentRepo.GetParticipant(ctx, req.WhiteParticipantID)
+	if err != nil {
+		return nil, fmt.Errorf("white participant not found: %w", err)
+	}
+	if white.TournamentID != req.TournamentID {
+		return nil, fmt.Errorf("white participant not in this tournament")
+	}
+
+	var warnings []ManualPairingWarning
+
+	// If not a bye, verify black participant and check for warnings
+	if req.BlackParticipantID != nil {
+		black, err := s.tournamentRepo.GetParticipant(ctx, *req.BlackParticipantID)
+		if err != nil {
+			return nil, fmt.Errorf("black participant not found: %w", err)
+		}
+		if black.TournamentID != req.TournamentID {
+			return nil, fmt.Errorf("black participant not in this tournament")
+		}
+
+		// Check for forbidden pairs
+		forbiddenPairs, err := s.tournamentRepo.ListForbiddenPairs(ctx, req.TournamentID)
+		if err == nil {
+			for _, fp := range forbiddenPairs {
+				if (fp.Player1ID == req.WhiteParticipantID && fp.Player2ID == *req.BlackParticipantID) ||
+					(fp.Player1ID == *req.BlackParticipantID && fp.Player2ID == req.WhiteParticipantID) {
+					warnings = append(warnings, ManualPairingWarning{
+						Type:    "forbidden_pair",
+						Message: fmt.Sprintf("These players are in a forbidden pair (reason: %s)", fp.Reason),
+					})
+					break
+				}
+			}
+		}
+
+		// Check for previous encounters
+		games, err := s.tournamentRepo.GetPlayerGames(ctx, req.TournamentID, req.WhiteParticipantID)
+		if err == nil {
+			for _, g := range games {
+				if (g.WhiteParticipantID != nil && *g.WhiteParticipantID == *req.BlackParticipantID) ||
+					(g.BlackParticipantID != nil && *g.BlackParticipantID == *req.BlackParticipantID) {
+					warnings = append(warnings, ManualPairingWarning{
+						Type:    "previous_encounter",
+						Message: "These players have already played each other in this tournament",
+					})
+				}
+			}
+		}
+	}
+
+	// Calculate board number if not specified
+	boardNumber := 0
+	if req.BoardNumber != nil {
+		boardNumber = *req.BoardNumber
+	} else {
+		// Get existing games in the round to find the next board number
+		games, err := s.tournamentRepo.ListGamesByRound(ctx, round.ID)
+		if err == nil {
+			for _, g := range games {
+				if g.BoardNumber >= boardNumber {
+					boardNumber = g.BoardNumber + 1
+				}
+			}
+		}
+		if boardNumber == 0 {
+			boardNumber = 1
+		}
+	}
+
+	// Create the game
+	game := tournament.Game{
+		ID:                 uuid.New(),
+		TournamentID:       req.TournamentID,
+		RoundID:            round.ID,
+		BoardNumber:        boardNumber,
+		WhiteParticipantID: &req.WhiteParticipantID,
+		BlackParticipantID: req.BlackParticipantID,
+		Status:             tournament.GameStatusScheduled,
+		CreatedAt:          time.Now(),
+	}
+
+	// If it's a bye, set result immediately
+	if req.BlackParticipantID == nil {
+		byeResult := "BYE"
+		// Use tournament scoring settings for bye points
+		scoring := tourney.ScoringSettings
+		if scoring == nil {
+			scoring = tournament.DefaultScoringSettings()
+		}
+		byeScore := scoring.WinPoints
+		zeroScore := 0.0
+		game.Result = &byeResult
+		game.WhiteScore = &byeScore
+		game.BlackScore = &zeroScore
+		game.Status = tournament.GameStatusCompleted
+		now := time.Now()
+		game.ResultEnteredAt = &now
+		game.ResultEnteredBy = &arbiterID
+
+		// Update white participant points
+		white.Points += byeScore
+		s.tournamentRepo.UpdateParticipant(ctx, white)
+	}
+
+	if err := s.tournamentRepo.CreateGames(ctx, []tournament.Game{game}); err != nil {
+		return nil, fmt.Errorf("failed to create game: %w", err)
+	}
+
+	s.logger.Info().
+		Str("tournament_id", req.TournamentID.String()).
+		Str("game_id", game.ID.String()).
+		Int("round", req.RoundNumber).
+		Int("board", boardNumber).
+		Str("arbiter_id", arbiterID.String()).
+		Msg("Manual pairing created by arbiter")
+
+	s.logAudit(ctx, &AuditAction{
+		ID:           uuid.New(),
+		TournamentID: req.TournamentID,
+		ArbiterID:    arbiterID,
+		Action:       "create_manual_pairing",
+		EntityType:   "game",
+		EntityID:     game.ID,
+		NewValue:     fmt.Sprintf("board %d", boardNumber),
+		CreatedAt:    time.Now(),
+	})
+
+	return &CreateManualPairingResponse{
+		GameID:   game.ID,
+		Warnings: warnings,
+	}, nil
 }
 
 // ChangeColorRequest contains data for swapping colors in a game

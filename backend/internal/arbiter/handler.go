@@ -46,6 +46,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 
 		// Player Management
 		arbiter.POST("/tournaments/:id/withdraw-player", h.WithdrawPlayer)
+		arbiter.POST("/tournaments/:id/reactivate-player", h.ReactivatePlayer)
 		arbiter.POST("/tournaments/:id/assign-bye", h.AssignBye)
 
 		// Result Management
@@ -54,6 +55,8 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 		// Pairing Management
 		arbiter.POST("/tournaments/:id/swap-pairing", h.SwapPairing)
 		arbiter.POST("/tournaments/:id/change-color", h.ChangeColor)
+		arbiter.POST("/tournaments/:id/create-pairing", h.CreateManualPairing)
+		arbiter.DELETE("/tournaments/:id/pairings/:gameId", h.DeletePairing)
 
 		// Announcements
 		arbiter.POST("/tournaments/:id/announcements", h.CreateAnnouncement)
@@ -153,6 +156,40 @@ func (h *Handler) WithdrawPlayer(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "player withdrawn"})
+}
+
+// ReactivatePlayer reactivates a withdrawn player
+// @Summary Reactivate player
+// @Tags arbiter
+// @Accept json
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param request body ReactivatePlayerRequest true "Reactivation data"
+// @Success 200
+// @Router /arbiter/tournaments/{id}/reactivate-player [post]
+func (h *Handler) ReactivatePlayer(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	var req ReactivatePlayerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.TournamentID = id
+
+	userID, _ := c.Get("user_id")
+	arbiterID, _ := userID.(uuid.UUID)
+
+	if err := h.service.ReactivatePlayer(c.Request.Context(), &req, arbiterID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "player reactivated"})
 }
 
 // AssignBye assigns a bye to a player
@@ -289,6 +326,83 @@ func (h *Handler) ChangeColor(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "colors changed"})
+}
+
+// DeletePairing deletes a pairing from a round
+// @Summary Delete pairing
+// @Tags arbiter
+// @Accept json
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param gameId path string true "Game ID"
+// @Param request body DeletePairingRequest true "Delete data"
+// @Success 200
+// @Router /arbiter/tournaments/{id}/pairings/{gameId} [delete]
+func (h *Handler) DeletePairing(c *gin.Context) {
+	tournamentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	gameID, err := uuid.Parse(c.Param("gameId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid game ID"})
+		return
+	}
+
+	var req DeletePairingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Allow empty body with just reason in query param
+		req.Reason = c.Query("reason")
+	}
+	req.TournamentID = tournamentID
+	req.GameID = gameID
+
+	userID, _ := c.Get("user_id")
+	arbiterID, _ := userID.(uuid.UUID)
+
+	if err := h.service.DeletePairing(c.Request.Context(), &req, arbiterID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "pairing deleted"})
+}
+
+// CreateManualPairing creates a manual pairing in a round
+// @Summary Create manual pairing
+// @Tags arbiter
+// @Accept json
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param request body CreateManualPairingRequest true "Pairing data"
+// @Success 201 {object} CreateManualPairingResponse
+// @Router /arbiter/tournaments/{id}/create-pairing [post]
+func (h *Handler) CreateManualPairing(c *gin.Context) {
+	tournamentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	var req CreateManualPairingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.TournamentID = tournamentID
+
+	userID, _ := c.Get("user_id")
+	arbiterID, _ := userID.(uuid.UUID)
+
+	response, err := h.service.CreateManualPairing(c.Request.Context(), &req, arbiterID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, response)
 }
 
 // CreateAnnouncement creates a tournament announcement

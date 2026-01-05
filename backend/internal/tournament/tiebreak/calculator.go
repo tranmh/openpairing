@@ -25,6 +25,7 @@ const (
 
 	// Additional tiebreaks
 	TBWinsBlack    TiebreakCode = "wins_black"
+	TBGamesPlayed  TiebreakCode = "games_played"
 	TBRating       TiebreakCode = "rating"
 	TBRatingPerf   TiebreakCode = "rating_performance"
 	TBAvgOppRating TiebreakCode = "avg_opponent_rating"
@@ -152,6 +153,8 @@ func (c *Calculator) calculateTiebreak(player *PlayerData, tb TiebreakCode) floa
 		return float64(player.GamesAsBlack)
 	case TBWinsBlack:
 		return float64(player.WinsAsBlack)
+	case TBGamesPlayed:
+		return float64(player.GamesPlayed)
 	case TBProgress:
 		return c.progress(player)
 	case TBAROC:
@@ -418,6 +421,7 @@ func AvailableTiebreaks() []TiebreakCode {
 		TBWins,
 		TBGamesBlack,
 		TBWinsBlack,
+		TBGamesPlayed,
 		TBProgress,
 		TBAROC,
 		TBKoya,
@@ -439,6 +443,7 @@ func TiebreakName(code TiebreakCode) string {
 		TBWins:            "Anzahl Siege",
 		TBGamesBlack:      "Partien mit Schwarz",
 		TBWinsBlack:       "Siege mit Schwarz",
+		TBGamesPlayed:     "Anzahl Partien",
 		TBProgress:        "Progressionswertung",
 		TBAROC:            "AROC",
 		TBKoya:            "Koya-System",

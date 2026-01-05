@@ -41,6 +41,10 @@ func (s *Service) GetStandings(ctx context.Context, tournamentID uuid.UUID) (*St
 		return nil, fmt.Errorf("failed to get games: %w", err)
 	}
 
+	// Get special rankings and eligibility data for badges
+	specialRankings, _ := s.repo.GetSpecialRankings(ctx, tournamentID)
+	eligibilityData, _ := s.repo.GetParticipantEligibilityData(ctx, tournamentID)
+
 	// Calculate tiebreaks
 	tiebreakCodes := make([]tiebreak.TiebreakCode, len(info.Tiebreaks))
 	for i, tb := range info.Tiebreaks {
@@ -124,6 +128,10 @@ func (s *Service) GetStandings(ctx context.Context, tournamentID uuid.UUID) (*St
 		participantMap[p.ID] = p
 	}
 
+	// Pre-calculate rank-in-group for each special ranking
+	// Maps: rankingID -> participantID -> rankInGroup
+	rankInGroupMap := s.calculateRankInGroups(calculatedStandings, specialRankings, eligibilityData)
+
 	for i, cs := range calculatedStandings {
 		p := participantMap[cs.PlayerID]
 
@@ -133,6 +141,302 @@ func (s *Service) GetStandings(ctx context.Context, tournamentID uuid.UUID) (*St
 		}
 
 		// Calculate performance rating
+		perfRating := s.calculatePerformanceRating(ctx, tournamentID, p.ID, p.Points, p.Wins+p.Draws+p.Losses)
+
+		// Calculate eligible rankings with rank-in-group
+		var eligibleRankings []EligibleRanking
+		if data, ok := eligibilityData[p.ID]; ok {
+			for _, sr := range specialRankings {
+				if isEligibleForRanking(data, sr) {
+					rankInGroup := 0
+					if ranks, ok := rankInGroupMap[sr.ID]; ok {
+						if r, ok := ranks[p.ID]; ok {
+							rankInGroup = r
+						}
+					}
+					eligibleRankings = append(eligibleRankings, EligibleRanking{
+						ID:          sr.ID,
+						Name:        sr.Name,
+						DisplayName: sr.DisplayName,
+						RankInGroup: rankInGroup,
+					})
+				}
+			}
+		}
+
+		standings[i] = Standing{
+			Rank:              cs.Rank,
+			ParticipantID:     p.ID,
+			PlayerID:          p.PlayerID,
+			PlayerName:        p.PlayerName,
+			PlayerFideID:      p.PlayerFideID,
+			PlayerTitle:       p.PlayerTitle,
+			ClubName:          p.ClubName,
+			Rating:            p.Rating,
+			Points:            p.Points,
+			GamesPlayed:       p.Wins + p.Draws + p.Losses,
+			Wins:              p.Wins,
+			Draws:             p.Draws,
+			Losses:            p.Losses,
+			Tiebreaks:         tiebreakMap,
+			IsActive:          p.IsActive,
+			PerformanceRating: perfRating,
+			EligibleRankings:  eligibleRankings,
+		}
+	}
+
+	return &StandingsResponse{
+		TournamentID:   tournamentID,
+		TournamentName: info.Name,
+		CurrentRound:   info.CurrentRound,
+		TotalRounds:    info.TotalRounds,
+		LastUpdated:    time.Now(),
+		Standings:      standings,
+		TiebreakOrder:  info.Tiebreaks,
+	}, nil
+}
+
+// calculateRankInGroups calculates the rank within each special ranking group
+func (s *Service) calculateRankInGroups(
+	standings []tiebreak.Standing,
+	rankings []SpecialRankingData,
+	eligibility map[uuid.UUID]ParticipantEligibilityData,
+) map[uuid.UUID]map[uuid.UUID]int {
+	result := make(map[uuid.UUID]map[uuid.UUID]int)
+
+	for _, sr := range rankings {
+		result[sr.ID] = make(map[uuid.UUID]int)
+		rank := 0
+		for _, standing := range standings {
+			if data, ok := eligibility[standing.PlayerID]; ok {
+				if isEligibleForRanking(data, sr) {
+					rank++
+					result[sr.ID][standing.PlayerID] = rank
+				}
+			}
+		}
+	}
+
+	return result
+}
+
+// isEligibleForRanking checks if a participant is eligible for a special ranking
+func isEligibleForRanking(data ParticipantEligibilityData, sr SpecialRankingData) bool {
+	if sr.MinBirthYear != nil && data.BirthYear < *sr.MinBirthYear {
+		return false
+	}
+	if sr.MaxBirthYear != nil && data.BirthYear > *sr.MaxBirthYear {
+		return false
+	}
+	if sr.MinRating != nil && data.Rating < *sr.MinRating {
+		return false
+	}
+	if sr.MaxRating != nil && data.Rating > *sr.MaxRating {
+		return false
+	}
+	if sr.Gender != nil && *sr.Gender != "" && data.Gender != *sr.Gender {
+		return false
+	}
+	return true
+}
+
+// GetCrosstable retrieves the crosstable for a tournament
+func (s *Service) GetCrosstable(ctx context.Context, tournamentID uuid.UUID) (*CrosstableResponse, error) {
+	// Get tournament info
+	info, err := s.repo.GetTournamentInfo(ctx, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tournament info: %w", err)
+	}
+
+	// Get crosstable data
+	rows, totalRounds, err := s.repo.GetCrosstableData(ctx, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get crosstable data: %w", err)
+	}
+
+	return &CrosstableResponse{
+		TournamentID:   tournamentID,
+		TournamentName: info.Name,
+		CurrentRound:   info.CurrentRound,
+		TotalRounds:    totalRounds,
+		Rows:           rows,
+	}, nil
+}
+
+// RankingCriteria contains filter criteria for special rankings
+type RankingCriteria struct {
+	MinBirthYear *int
+	MaxBirthYear *int
+	MinRating    *int
+	MaxRating    *int
+	Gender       *string
+}
+
+// IsEligible checks if a player matches the criteria
+func (c *RankingCriteria) IsEligible(birthYear int, rating int, gender string) bool {
+	if c.MinBirthYear != nil && birthYear < *c.MinBirthYear {
+		return false
+	}
+	if c.MaxBirthYear != nil && birthYear > *c.MaxBirthYear {
+		return false
+	}
+	if c.MinRating != nil && rating < *c.MinRating {
+		return false
+	}
+	if c.MaxRating != nil && rating > *c.MaxRating {
+		return false
+	}
+	if c.Gender != nil && *c.Gender != "" && gender != *c.Gender {
+		return false
+	}
+	return true
+}
+
+// GetFilteredStandings retrieves standings filtered by special ranking criteria
+func (s *Service) GetFilteredStandings(ctx context.Context, tournamentID uuid.UUID, criteria *RankingCriteria) (*StandingsResponse, error) {
+	// Get tournament info
+	info, err := s.repo.GetTournamentInfo(ctx, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tournament info: %w", err)
+	}
+
+	// Get all participants
+	participants, err := s.repo.GetParticipants(ctx, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get participants: %w", err)
+	}
+
+	// Get eligibility data
+	eligibilityData, err := s.repo.GetParticipantEligibilityData(ctx, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get eligibility data: %w", err)
+	}
+
+	// Filter participants by criteria
+	var filteredParticipants []ParticipantData
+	for _, p := range participants {
+		data, ok := eligibilityData[p.ID]
+		if !ok {
+			continue
+		}
+		if criteria.IsEligible(data.BirthYear, data.Rating, data.Gender) {
+			filteredParticipants = append(filteredParticipants, p)
+		}
+	}
+
+	if len(filteredParticipants) == 0 {
+		return &StandingsResponse{
+			TournamentID:   tournamentID,
+			TournamentName: info.Name,
+			CurrentRound:   info.CurrentRound,
+			TotalRounds:    info.TotalRounds,
+			LastUpdated:    time.Now(),
+			Standings:      []Standing{},
+			TiebreakOrder:  info.Tiebreaks,
+		}, nil
+	}
+
+	// Get all games for tiebreak calculation
+	games, err := s.repo.GetGames(ctx, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get games: %w", err)
+	}
+
+	// Calculate tiebreaks for filtered participants
+	tiebreakCodes := make([]tiebreak.TiebreakCode, len(info.Tiebreaks))
+	for i, tb := range info.Tiebreaks {
+		tiebreakCodes[i] = tiebreak.TiebreakCode(tb)
+	}
+
+	scoringConfig := &tiebreak.ScoringConfig{
+		WinPoints:           info.Scoring.WinPoints,
+		DrawPoints:          info.Scoring.DrawPoints,
+		LossPoints:          info.Scoring.LossPoints,
+		SonnebornBergerMode: info.Scoring.SonnebornBergerMode,
+	}
+	calculator := tiebreak.NewCalculatorWithScoring(tiebreakCodes, info.TotalRounds, scoringConfig)
+
+	// Build player data - need points for ALL participants for opponent points calculation
+	allParticipantPoints := make(map[uuid.UUID]float64)
+	for _, p := range participants {
+		allParticipantPoints[p.ID] = p.Points
+	}
+
+	// Build filtered participant set for ranking
+	filteredIDs := make(map[uuid.UUID]bool)
+	for _, p := range filteredParticipants {
+		filteredIDs[p.ID] = true
+	}
+
+	for _, p := range filteredParticipants {
+		playerData := &tiebreak.PlayerData{
+			ID:          p.ID,
+			StartRank:   p.StartRank,
+			Rating:      p.Rating,
+			Points:      p.Points,
+			Wins:        p.Wins,
+			Draws:       p.Draws,
+			Losses:      p.Losses,
+			GamesPlayed: p.Wins + p.Draws + p.Losses,
+			Results:     []tiebreak.PlayerResult{},
+		}
+
+		// Add game results
+		for _, g := range games {
+			var result *tiebreak.PlayerResult
+
+			if g.WhiteParticipantID != nil && *g.WhiteParticipantID == p.ID {
+				if g.BlackParticipantID != nil && g.WhiteScore != nil {
+					result = &tiebreak.PlayerResult{
+						OpponentID:  *g.BlackParticipantID,
+						Score:       *g.WhiteScore,
+						OpponentPts: allParticipantPoints[*g.BlackParticipantID],
+						PlayedWhite: true,
+						RoundNumber: g.RoundNumber,
+					}
+				}
+			} else if g.BlackParticipantID != nil && *g.BlackParticipantID == p.ID {
+				if g.WhiteParticipantID != nil && g.BlackScore != nil {
+					result = &tiebreak.PlayerResult{
+						OpponentID:  *g.WhiteParticipantID,
+						Score:       *g.BlackScore,
+						OpponentPts: allParticipantPoints[*g.WhiteParticipantID],
+						PlayedWhite: false,
+						RoundNumber: g.RoundNumber,
+					}
+					playerData.GamesAsBlack++
+					if *g.BlackScore == info.Scoring.WinPoints {
+						playerData.WinsAsBlack++
+					}
+				}
+			}
+
+			if result != nil {
+				playerData.Results = append(playerData.Results, *result)
+			}
+		}
+
+		calculator.AddPlayer(playerData)
+	}
+
+	// Get calculated standings
+	calculatedStandings := calculator.GetStandings()
+
+	// Build response
+	participantMap := make(map[uuid.UUID]ParticipantData)
+	for _, p := range filteredParticipants {
+		participantMap[p.ID] = p
+	}
+
+	standings := make([]Standing, len(calculatedStandings))
+	for i, cs := range calculatedStandings {
+		p := participantMap[cs.PlayerID]
+
+		tiebreakMap := make(map[string]float64)
+		for code, value := range cs.Tiebreaks {
+			tiebreakMap[string(code)] = value
+		}
+
 		perfRating := s.calculatePerformanceRating(ctx, tournamentID, p.ID, p.Points, p.Wins+p.Draws+p.Losses)
 
 		standings[i] = Standing{
@@ -163,29 +467,6 @@ func (s *Service) GetStandings(ctx context.Context, tournamentID uuid.UUID) (*St
 		LastUpdated:    time.Now(),
 		Standings:      standings,
 		TiebreakOrder:  info.Tiebreaks,
-	}, nil
-}
-
-// GetCrosstable retrieves the crosstable for a tournament
-func (s *Service) GetCrosstable(ctx context.Context, tournamentID uuid.UUID) (*CrosstableResponse, error) {
-	// Get tournament info
-	info, err := s.repo.GetTournamentInfo(ctx, tournamentID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tournament info: %w", err)
-	}
-
-	// Get crosstable data
-	rows, totalRounds, err := s.repo.GetCrosstableData(ctx, tournamentID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get crosstable data: %w", err)
-	}
-
-	return &CrosstableResponse{
-		TournamentID:   tournamentID,
-		TournamentName: info.Name,
-		CurrentRound:   info.CurrentRound,
-		TotalRounds:    totalRounds,
-		Rows:           rows,
 	}, nil
 }
 
@@ -323,6 +604,7 @@ func (s *Service) GetAvailableTiebreaks() []TiebreakInfo {
 		tiebreak.TBWins:            "Total number of wins",
 		tiebreak.TBGamesBlack:      "Total number of games played with black pieces",
 		tiebreak.TBWinsBlack:       "Number of wins with black pieces",
+		tiebreak.TBGamesPlayed:     "Total number of games played",
 		tiebreak.TBProgress:        "Sum of cumulative scores after each round",
 		tiebreak.TBAROC:            "Average rating of opponents, excluding lowest",
 		tiebreak.TBKoya:            "Points against opponents with 50%+ score",
