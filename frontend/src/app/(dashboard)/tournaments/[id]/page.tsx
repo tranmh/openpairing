@@ -35,6 +35,7 @@ import {
   Play,
   Pause,
   Download,
+  Printer,
   Share2,
   Edit,
   CheckCircle,
@@ -280,7 +281,7 @@ export default function TournamentDetailPage() {
               Einstellungen
             </Button>
           </Link>
-          <Button variant="outline" onClick={() => window.open(`/api/tournaments/${tournamentId}/export/trf`)}>
+          <Button variant="outline" onClick={() => window.open(`/api/v1/tournaments/${tournamentId}/export/trf`)}>
             <Download className="mr-2 h-4 w-4" />
             TRF Export
           </Button>
@@ -465,14 +466,33 @@ function ParticipantsTab({
       <CardHeader>
         <div className="flex justify-between items-center">
           <CardTitle>Teilnehmerliste ({activeParticipants.length})</CardTitle>
-          {canRegister && (
-            <Link href={`/tournaments/${tournamentId}/register`}>
-              <Button>
-                <Users className="mr-2 h-4 w-4" />
-                Spieler anmelden
-              </Button>
-            </Link>
-          )}
+          <div className="flex gap-2">
+            {activeParticipants.length > 0 && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => window.print()} className="no-print">
+                  <Printer className="mr-2 h-4 w-4" />
+                  Drucken
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.open(`/api/v1/tournaments/${tournamentId}/export/participants/pdf`)}
+                  className="no-print"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  PDF
+                </Button>
+              </>
+            )}
+            {canRegister && (
+              <Link href={`/tournaments/${tournamentId}/register`}>
+                <Button>
+                  <Users className="mr-2 h-4 w-4" />
+                  Spieler anmelden
+                </Button>
+              </Link>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -571,6 +591,23 @@ function PairingsTab({
                 </option>
               ))}
             </select>
+            {games.length > 0 && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => window.print()} className="no-print">
+                  <Printer className="mr-2 h-4 w-4" />
+                  Drucken
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.open(`/api/v1/tournaments/${tournamentId}/rounds/${selectedRound}/export/pairings/pdf`)}
+                  className="no-print"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  PDF
+                </Button>
+              </>
+            )}
             {currentRound?.status === 'pending' && (
               <Button onClick={() => generatePairingsMutation.mutate()}>
                 Paarungen erstellen
@@ -637,7 +674,33 @@ function StandingsTab({ tournamentId }: { tournamentId: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Tabelle</CardTitle>
+        <div className="flex justify-between items-center">
+          <CardTitle>Tabelle</CardTitle>
+          {standings.length > 0 && (
+            <div className="flex gap-2 no-print">
+              <Button variant="outline" size="sm" onClick={() => window.print()}>
+                <Printer className="mr-2 h-4 w-4" />
+                Drucken
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(`/api/v1/tournaments/${tournamentId}/export/standings/pdf`)}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                PDF
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(`/api/v1/tournaments/${tournamentId}/export/crosstable/pdf`)}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Kreuztabelle
+              </Button>
+            </div>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         {isLoading ? (

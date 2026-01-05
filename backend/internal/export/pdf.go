@@ -552,3 +552,241 @@ func (g *PDFGenerator) addSignatureLines(data *CertificateData) {
 	}
 	g.pdf.CellFormat(lineWidth, 5, orgLabel, "", 0, "C", false, 0, "")
 }
+
+// GeneratePairingsPDF generates a PDF of round pairings
+func (g *PDFGenerator) GeneratePairingsPDF(data *PairingsExport) ([]byte, error) {
+	g.pdf = fpdf.New("P", "mm", "A4", "")
+	g.pageWidth, g.pageHeight = g.pdf.GetPageSize()
+
+	g.pdf.SetMargins(g.margin, g.margin, g.margin)
+	g.pdf.SetAutoPageBreak(true, g.margin)
+
+	g.pdf.AddPage()
+
+	// Header
+	g.addHeader(data.TournamentName, fmt.Sprintf("Paarungen - Runde %d", data.RoundNumber))
+
+	// Round info
+	g.pdf.SetFont("Arial", "", 9)
+	g.pdf.CellFormat(0, 5, fmt.Sprintf("Datum: %s", data.Date.Format("02.01.2006")), "", 1, "L", false, 0, "")
+	if data.Site != "" {
+		g.pdf.CellFormat(0, 5, fmt.Sprintf("Ort: %s", data.Site), "", 1, "L", false, 0, "")
+	}
+	g.pdf.Ln(5)
+
+	// Pairings table
+	g.addPairingsTable(data.Games)
+
+	// Footer
+	g.addFooter()
+
+	// Output to bytes
+	var buf bytes.Buffer
+	err := g.pdf.Output(&buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate PDF: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+func (g *PDFGenerator) addPairingsTable(games []PairingGame) {
+	if len(games) == 0 {
+		g.pdf.SetFont("Arial", "I", 10)
+		g.pdf.CellFormat(0, 10, "Keine Paarungen vorhanden", "", 1, "C", false, 0, "")
+		return
+	}
+
+	availWidth := g.pageWidth - 2*g.margin
+
+	// Column definitions
+	colBoard := 12.0
+	colWhiteRating := 15.0
+	colResult := 18.0
+	colBlackRating := 15.0
+
+	nameWidth := (availWidth - colBoard - colWhiteRating - colResult - colBlackRating) / 2
+	colWhiteName := nameWidth
+	colBlackName := nameWidth
+
+	// Table header
+	g.pdf.SetFont("Arial", "B", 8)
+	g.pdf.SetFillColor(220, 220, 220)
+
+	g.pdf.CellFormat(colBoard, 7, "Brett", "1", 0, "C", true, 0, "")
+	g.pdf.CellFormat(colWhiteName, 7, "Weiß", "1", 0, "L", true, 0, "")
+	g.pdf.CellFormat(colWhiteRating, 7, "Elo", "1", 0, "C", true, 0, "")
+	g.pdf.CellFormat(colResult, 7, "Ergebnis", "1", 0, "C", true, 0, "")
+	g.pdf.CellFormat(colBlackRating, 7, "Elo", "1", 0, "C", true, 0, "")
+	g.pdf.CellFormat(colBlackName, 7, "Schwarz", "1", 1, "R", true, 0, "")
+
+	// Table rows
+	g.pdf.SetFont("Arial", "", 8)
+
+	for i, game := range games {
+		if i%2 == 0 {
+			g.pdf.SetFillColor(245, 245, 245)
+		} else {
+			g.pdf.SetFillColor(255, 255, 255)
+		}
+
+		whiteName := game.WhiteName
+		if len(whiteName) > 25 {
+			whiteName = whiteName[:22] + "..."
+		}
+		blackName := game.BlackName
+		if blackName == "" {
+			blackName = "spielfrei"
+		} else if len(blackName) > 25 {
+			blackName = blackName[:22] + "..."
+		}
+
+		result := game.Result
+		if result == "" {
+			result = "-"
+		}
+
+		whiteRating := fmt.Sprintf("%d", game.WhiteRating)
+		if game.WhiteRating == 0 {
+			whiteRating = "-"
+		}
+		blackRating := fmt.Sprintf("%d", game.BlackRating)
+		if game.BlackRating == 0 {
+			blackRating = "-"
+		}
+
+		g.pdf.CellFormat(colBoard, 6, fmt.Sprintf("%d", game.BoardNumber), "1", 0, "C", true, 0, "")
+		g.pdf.CellFormat(colWhiteName, 6, whiteName, "1", 0, "L", true, 0, "")
+		g.pdf.CellFormat(colWhiteRating, 6, whiteRating, "1", 0, "C", true, 0, "")
+		g.pdf.CellFormat(colResult, 6, result, "1", 0, "C", true, 0, "")
+		g.pdf.CellFormat(colBlackRating, 6, blackRating, "1", 0, "C", true, 0, "")
+		g.pdf.CellFormat(colBlackName, 6, blackName, "1", 1, "R", true, 0, "")
+	}
+
+	g.pdf.Ln(5)
+	g.pdf.SetFont("Arial", "I", 8)
+	g.pdf.CellFormat(0, 5, fmt.Sprintf("Gesamt: %d Partien", len(games)), "", 1, "L", false, 0, "")
+}
+
+// GenerateParticipantListPDF generates a PDF of tournament participant list
+func (g *PDFGenerator) GenerateParticipantListPDF(tournament *TournamentExport) ([]byte, error) {
+	g.pdf = fpdf.New("P", "mm", "A4", "")
+	g.pageWidth, g.pageHeight = g.pdf.GetPageSize()
+
+	g.pdf.SetMargins(g.margin, g.margin, g.margin)
+	g.pdf.SetAutoPageBreak(true, g.margin)
+
+	g.pdf.AddPage()
+
+	// Header
+	g.addHeader(tournament.Name, "Teilnehmerliste")
+
+	// Tournament info
+	g.addTournamentInfo(tournament)
+
+	// Participant list table
+	g.addParticipantListTable(tournament)
+
+	// Footer
+	g.addFooter()
+
+	var buf bytes.Buffer
+	err := g.pdf.Output(&buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate PDF: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+func (g *PDFGenerator) addParticipantListTable(tournament *TournamentExport) {
+	if len(tournament.Participants) == 0 {
+		g.pdf.SetFont("Arial", "I", 10)
+		g.pdf.CellFormat(0, 10, "Keine Teilnehmer vorhanden", "", 1, "C", false, 0, "")
+		return
+	}
+
+	availWidth := g.pageWidth - 2*g.margin
+
+	// Column definitions
+	colRank := 10.0
+	colRating := 15.0
+	colFideID := 22.0
+	colTitle := 12.0
+	colFederation := 15.0
+	colClub := 35.0
+
+	// Calculate name column width
+	usedWidth := colRank + colRating + colFideID + colTitle + colFederation + colClub
+	colName := availWidth - usedWidth
+	if colName < 40 {
+		colName = 40
+		colClub = 0 // Hide club if not enough space
+	}
+
+	// Table header
+	g.pdf.SetFont("Arial", "B", 8)
+	g.pdf.SetFillColor(220, 220, 220)
+
+	g.pdf.CellFormat(colRank, 7, "Nr.", "1", 0, "C", true, 0, "")
+	g.pdf.CellFormat(colName, 7, "Name", "1", 0, "L", true, 0, "")
+	g.pdf.CellFormat(colRating, 7, "Elo", "1", 0, "C", true, 0, "")
+	g.pdf.CellFormat(colFideID, 7, "FIDE-ID", "1", 0, "C", true, 0, "")
+	g.pdf.CellFormat(colTitle, 7, "Titel", "1", 0, "C", true, 0, "")
+	g.pdf.CellFormat(colFederation, 7, "Fed", "1", 0, "C", true, 0, "")
+	if colClub > 0 {
+		g.pdf.CellFormat(colClub, 7, "Verein", "1", 0, "L", true, 0, "")
+	}
+	g.pdf.Ln(-1)
+
+	// Table rows - sorted by start rank
+	g.pdf.SetFont("Arial", "", 8)
+
+	for i, p := range tournament.Participants {
+		if i%2 == 0 {
+			g.pdf.SetFillColor(245, 245, 245)
+		} else {
+			g.pdf.SetFillColor(255, 255, 255)
+		}
+
+		fideID := ""
+		if p.FideID != nil {
+			fideID = *p.FideID
+		}
+		title := ""
+		if p.Title != nil {
+			title = *p.Title
+		}
+		federation := ""
+		if p.Federation != nil {
+			federation = *p.Federation
+		}
+		club := ""
+		if p.Club != nil {
+			club = *p.Club
+		}
+
+		name := p.Name
+		if len(name) > 30 {
+			name = name[:27] + "..."
+		}
+
+		g.pdf.CellFormat(colRank, 6, fmt.Sprintf("%d", p.StartRank), "1", 0, "C", true, 0, "")
+		g.pdf.CellFormat(colName, 6, name, "1", 0, "L", true, 0, "")
+		g.pdf.CellFormat(colRating, 6, fmt.Sprintf("%d", p.Rating), "1", 0, "C", true, 0, "")
+		g.pdf.CellFormat(colFideID, 6, fideID, "1", 0, "C", true, 0, "")
+		g.pdf.CellFormat(colTitle, 6, title, "1", 0, "C", true, 0, "")
+		g.pdf.CellFormat(colFederation, 6, federation, "1", 0, "C", true, 0, "")
+		if colClub > 0 {
+			if len(club) > 20 {
+				club = club[:17] + "..."
+			}
+			g.pdf.CellFormat(colClub, 6, club, "1", 0, "L", true, 0, "")
+		}
+		g.pdf.Ln(-1)
+	}
+
+	g.pdf.Ln(5)
+	g.pdf.SetFont("Arial", "I", 8)
+	g.pdf.CellFormat(0, 5, fmt.Sprintf("Gesamt: %d Teilnehmer", len(tournament.Participants)), "", 1, "L", false, 0, "")
+}

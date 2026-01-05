@@ -99,6 +99,25 @@ type RoundResult struct {
 	Score        string // "1", "0", "=", "+" (forfeit win), "-" (forfeit loss)
 }
 
+// PairingsExport contains data for pairings PDF export
+type PairingsExport struct {
+	TournamentName string
+	Site           string
+	RoundNumber    int
+	Date           time.Time
+	Games          []PairingGame
+}
+
+// PairingGame represents a single pairing for export
+type PairingGame struct {
+	BoardNumber int
+	WhiteName   string
+	WhiteRating int
+	BlackName   string
+	BlackRating int
+	Result      string
+}
+
 // ExportRequest represents a request to export data
 type ExportRequest struct {
 	TournamentID *uuid.UUID  `json:"tournamentId,omitempty"`

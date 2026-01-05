@@ -282,6 +282,66 @@ func (s *Service) ExportCrosstablePDF(ctx context.Context, tournamentID uuid.UUI
 	}, nil
 }
 
+// ExportParticipantListPDF exports tournament participant list in PDF format
+func (s *Service) ExportParticipantListPDF(ctx context.Context, tournamentID uuid.UUID) (*PDFExportResponse, error) {
+	tournament, err := s.repo.GetTournamentExportData(ctx, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tournament data: %w", err)
+	}
+
+	pdfBytes, err := s.pdfGenerator.GenerateParticipantListPDF(tournament)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate PDF: %w", err)
+	}
+
+	safeName := sanitizeFilename(tournament.Name)
+	filename := fmt.Sprintf("%s_teilnehmerliste.pdf", safeName)
+
+	return &PDFExportResponse{
+		Format:   FormatPDF,
+		Filename: filename,
+		Content:  pdfBytes,
+		MimeType: FormatPDF.GetMimeType(),
+	}, nil
+}
+
+// ExportPairingsPDF exports round pairings in PDF format
+func (s *Service) ExportPairingsPDF(ctx context.Context, tournamentID uuid.UUID, roundNumber int) (*PDFExportResponse, error) {
+	tournament, err := s.repo.GetTournamentExportData(ctx, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tournament data: %w", err)
+	}
+
+	// Get pairings for the round
+	games, err := s.repo.GetRoundPairings(ctx, tournamentID, roundNumber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pairings: %w", err)
+	}
+
+	pairingsData := &PairingsExport{
+		TournamentName: tournament.Name,
+		Site:           tournament.Site,
+		RoundNumber:    roundNumber,
+		Date:           tournament.StartDate,
+		Games:          games,
+	}
+
+	pdfBytes, err := s.pdfGenerator.GeneratePairingsPDF(pairingsData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate PDF: %w", err)
+	}
+
+	safeName := sanitizeFilename(tournament.Name)
+	filename := fmt.Sprintf("%s_runde%d_paarungen.pdf", safeName, roundNumber)
+
+	return &PDFExportResponse{
+		Format:   FormatPDF,
+		Filename: filename,
+		Content:  pdfBytes,
+		MimeType: FormatPDF.GetMimeType(),
+	}, nil
+}
+
 // PDFExportResponse contains the exported PDF data (binary)
 type PDFExportResponse struct {
 	Format   ExportFormat `json:"format"`

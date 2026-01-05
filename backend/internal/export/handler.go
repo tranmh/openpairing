@@ -398,3 +398,75 @@ func (h *Handler) ExportTopCertificates(c *gin.Context) {
 	c.Header("Content-Disposition", "attachment; filename=certificates.zip")
 	c.Data(http.StatusOK, "application/zip", zipContent)
 }
+
+// ExportParticipantListPDF exports tournament participant list in PDF format
+// @Summary Export participant list as PDF
+// @Description Export tournament participant list in PDF format
+// @Tags export
+// @Produce application/pdf
+// @Param id path string true "Tournament ID"
+// @Success 200 {file} file "PDF file"
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /tournaments/{id}/export/participants/pdf [get]
+func (h *Handler) ExportParticipantListPDF(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	export, err := h.service.ExportParticipantListPDF(c.Request.Context(), id)
+	if err != nil {
+		if err.Error() == "tournament not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	c.Data(http.StatusOK, export.MimeType, export.Content)
+}
+
+// ExportPairingsPDF exports round pairings in PDF format
+// @Summary Export round pairings as PDF
+// @Description Export round pairings in PDF format
+// @Tags export
+// @Produce application/pdf
+// @Param id path string true "Tournament ID"
+// @Param round path int true "Round number"
+// @Success 200 {file} file "PDF file"
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /tournaments/{id}/rounds/{round}/export/pairings/pdf [get]
+func (h *Handler) ExportPairingsPDF(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	roundStr := c.Param("round")
+	roundNum, err := strconv.Atoi(roundStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid round number"})
+		return
+	}
+
+	export, err := h.service.ExportPairingsPDF(c.Request.Context(), id, roundNum)
+	if err != nil {
+		if err.Error() == "tournament not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	c.Data(http.StatusOK, export.MimeType, export.Content)
+}

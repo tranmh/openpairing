@@ -332,3 +332,89 @@ func TestColorCode(t *testing.T) {
 		assert.Equal(t, tt.expected, result, "colorCode(%v)", tt.color)
 	}
 }
+
+func TestPDFGenerator_GenerateParticipantListPDF(t *testing.T) {
+	g := NewPDFGenerator()
+	tournament := createTestTournament()
+
+	pdfBytes, err := g.GenerateParticipantListPDF(tournament)
+	require.NoError(t, err)
+	assert.NotEmpty(t, pdfBytes)
+
+	// Check PDF header (magic bytes)
+	assert.True(t, len(pdfBytes) > 4)
+	assert.Equal(t, "%PDF", string(pdfBytes[:4]))
+}
+
+func TestPDFGenerator_GenerateParticipantListPDF_Empty(t *testing.T) {
+	g := NewPDFGenerator()
+	tournament := &TournamentExport{
+		ID:           uuid.New(),
+		Name:         "Empty Tournament",
+		Site:         "Test Site",
+		StartDate:    time.Now(),
+		Rounds:       5,
+		Type:         "Swiss",
+		Participants: []ParticipantExport{},
+	}
+
+	pdfBytes, err := g.GenerateParticipantListPDF(tournament)
+	require.NoError(t, err)
+	assert.NotEmpty(t, pdfBytes)
+}
+
+func TestPDFGenerator_GeneratePairingsPDF(t *testing.T) {
+	g := NewPDFGenerator()
+	pairings := &PairingsExport{
+		TournamentName: "Test Tournament",
+		Site:           "Test Site",
+		RoundNumber:    1,
+		Date:           time.Now(),
+		Games: []PairingGame{
+			{BoardNumber: 1, WhiteName: "Player A", WhiteRating: 2000, BlackName: "Player B", BlackRating: 1900, Result: ""},
+			{BoardNumber: 2, WhiteName: "Player C", WhiteRating: 1850, BlackName: "Player D", BlackRating: 1800, Result: "1-0"},
+			{BoardNumber: 3, WhiteName: "Player E", WhiteRating: 1750, BlackName: "Player F", BlackRating: 1700, Result: "0-1"},
+			{BoardNumber: 4, WhiteName: "Player G", WhiteRating: 1650, BlackName: "Player H", BlackRating: 1600, Result: "1/2-1/2"},
+		},
+	}
+
+	pdfBytes, err := g.GeneratePairingsPDF(pairings)
+	require.NoError(t, err)
+	assert.NotEmpty(t, pdfBytes)
+
+	// Check PDF header (magic bytes)
+	assert.True(t, len(pdfBytes) > 4)
+	assert.Equal(t, "%PDF", string(pdfBytes[:4]))
+}
+
+func TestPDFGenerator_GeneratePairingsPDF_Empty(t *testing.T) {
+	g := NewPDFGenerator()
+	pairings := &PairingsExport{
+		TournamentName: "Test Tournament",
+		RoundNumber:    1,
+		Date:           time.Now(),
+		Games:          []PairingGame{},
+	}
+
+	pdfBytes, err := g.GeneratePairingsPDF(pairings)
+	require.NoError(t, err)
+	assert.NotEmpty(t, pdfBytes)
+}
+
+func TestPDFGenerator_GeneratePairingsPDF_WithBye(t *testing.T) {
+	g := NewPDFGenerator()
+	pairings := &PairingsExport{
+		TournamentName: "Test Tournament",
+		Site:           "Test Site",
+		RoundNumber:    1,
+		Date:           time.Now(),
+		Games: []PairingGame{
+			{BoardNumber: 1, WhiteName: "Player A", WhiteRating: 2000, BlackName: "Player B", BlackRating: 1900, Result: "1-0"},
+			{BoardNumber: 2, WhiteName: "Player C", WhiteRating: 1850, BlackName: "", BlackRating: 0, Result: "BYE"},
+		},
+	}
+
+	pdfBytes, err := g.GeneratePairingsPDF(pairings)
+	require.NoError(t, err)
+	assert.NotEmpty(t, pdfBytes)
+}

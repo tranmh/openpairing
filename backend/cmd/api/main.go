@@ -424,7 +424,10 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 			exports.GET("/pgn", exportHandler.ExportTournamentPGN)
 			exports.GET("/json", exportHandler.ExportTournamentJSON)
 			exports.GET("/standings", exportHandler.ExportStandingsCSV)
+			exports.GET("/standings/pdf", exportHandler.ExportStandingsPDF)
 			exports.GET("/crosstable", exportHandler.ExportCrosstableCSV)
+			exports.GET("/crosstable/pdf", exportHandler.ExportCrosstablePDF)
+			exports.GET("/participants/pdf", exportHandler.ExportParticipantListPDF)
 		}
 
 		// Certificate routes
@@ -433,6 +436,7 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 
 		// Round exports
 		v1.GET("/tournaments/:id/rounds/:round/export/pgn", middleware.APIRateLimit(), exportHandler.ExportRoundPGN)
+		v1.GET("/tournaments/:id/rounds/:round/export/pairings/pdf", middleware.APIRateLimit(), exportHandler.ExportPairingsPDF)
 
 		// Standings routes
 		v1.GET("/tournaments/:id/standings", middleware.APIRateLimit(), standingsHandler.GetStandings)

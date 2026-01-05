@@ -180,11 +180,110 @@
 
 /* Print styles */
 @media print {
-  .no-print {
+  /* Hide non-print elements */
+  .no-print,
+  nav,
+  header,
+  footer,
+  aside,
+  button:not(.print-show) {
     display: none !important;
   }
 
+  /* Reset page margins */
+  @page {
+    margin: 15mm;
+    size: A4;
+  }
+
+  /* Body reset */
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 10pt !important;
+    line-height: 1.4 !important;
+  }
+
+  /* Make cards look good */
+  .card,
+  [class*="Card"] {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    break-inside: avoid;
+  }
+
+  /* Table styling for print */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 9pt !important;
+  }
+
+  table th,
+  table td {
+    border: 1px solid #333 !important;
+    padding: 4px 6px !important;
+    text-align: left !important;
+  }
+
+  table th {
+    background: #eee !important;
+    font-weight: bold !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Alternating row colors */
+  table tbody tr:nth-child(even) {
+    background: #f9f9f9 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Page breaks */
+  h1, h2, h3 {
+    page-break-after: avoid;
+  }
+
+  table {
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  /* Tournament standings table */
   .standings-table {
-    font-size: 10pt;
+    font-size: 9pt !important;
+  }
+
+  .standings-table th,
+  .standings-table td {
+    padding: 3px 5px !important;
+  }
+
+  /* Hide scrollbars */
+  * {
+    overflow: visible !important;
+  }
+
+  /* Links show as text */
+  a {
+    text-decoration: none !important;
+    color: black !important;
+  }
+
+  /* Force container to full width */
+  .container {
+    max-width: 100% !important;
+    padding: 0 !important;
   }
 }

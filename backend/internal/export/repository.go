@@ -433,6 +433,50 @@ func (r *Repository) GetSingleGameExportData(ctx context.Context, gameID uuid.UU
 	return &g, nil
 }
 
+// GetRoundPairings retrieves pairings for a specific round
+func (r *Repository) GetRoundPairings(ctx context.Context, tournamentID uuid.UUID, roundNumber int) ([]PairingGame, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			g.board_number,
+			COALESCE(wp.first_name, '') || ' ' || COALESCE(wp.last_name, ''),
+			COALESCE(wtp.starting_rating, 0),
+			COALESCE(bp.first_name, '') || ' ' || COALESCE(bp.last_name, ''),
+			COALESCE(btp.starting_rating, 0),
+			COALESCE(g.result, '')
+		FROM games g
+		JOIN tournament_rounds tr ON tr.id = g.round_id
+		LEFT JOIN tournament_participants wtp ON wtp.id = g.white_participant_id
+		LEFT JOIN tournament_participants btp ON btp.id = g.black_participant_id
+		LEFT JOIN players wp ON wp.id = wtp.player_id
+		LEFT JOIN players bp ON bp.id = btp.player_id
+		WHERE g.tournament_id = $1 AND tr.round_number = $2
+		ORDER BY g.board_number
+	`, tournamentID, roundNumber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pairings: %w", err)
+	}
+	defer rows.Close()
+
+	var pairings []PairingGame
+	for rows.Next() {
+		var p PairingGame
+		err := rows.Scan(
+			&p.BoardNumber,
+			&p.WhiteName,
+			&p.WhiteRating,
+			&p.BlackName,
+			&p.BlackRating,
+			&p.Result,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan pairing: %w", err)
+		}
+		pairings = append(pairings, p)
+	}
+
+	return pairings, rows.Err()
+}
+
 func getStringValue(s *string) string {
 	if s == nil {
 		return ""
