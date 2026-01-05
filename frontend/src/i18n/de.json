@@ -22,7 +22,41 @@
     "error": "Fehler",
     "success": "Erfolg",
     "warning": "Warnung",
-    "info": "Information"
+    "info": "Information",
+    "min": "Min",
+    "max": "Max",
+    "noResults": "Keine Ergebnisse",
+    "all": "Alle",
+    "apply": "Anwenden"
+  },
+  "chess": {
+    "white": "Weiß",
+    "black": "Schwarz",
+    "game": "Partie",
+    "games": "Partien",
+    "moves": "Züge",
+    "noMovesYet": "Noch keine Züge",
+    "rematch": "Revanche",
+    "newGame": "Neue Partie"
+  },
+  "game": {
+    "result": {
+      "youWon": "Sie haben gewonnen!",
+      "youLost": "Sie haben verloren",
+      "draw": "Remis",
+      "aborted": "Partie abgebrochen"
+    },
+    "termination": {
+      "checkmate": "Schachmatt",
+      "resignation": "Aufgabe",
+      "timeout": "Zeit abgelaufen",
+      "drawByAgreement": "Remis durch Vereinbarung",
+      "stalemate": "Patt",
+      "insufficientMaterial": "Ungenügendes Material",
+      "threefoldRepetition": "Dreifache Stellungswiederholung",
+      "fiftyMoveRule": "50-Züge-Regel",
+      "aborted": "Partie abgebrochen"
+    }
   },
   "auth": {
     "login": "Anmelden",
@@ -44,7 +78,19 @@
     "settings": "Einstellungen",
     "firstName": "Vorname",
     "lastName": "Nachname",
-    "language": "Sprache"
+    "language": "Sprache",
+    "role": {
+      "player": "Spieler",
+      "arbiter": "Schiedsrichter",
+      "organizer": "Veranstalter",
+      "admin": "Administrator"
+    }
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "tournaments": "Turniere",
+    "players": "Spieler",
+    "teams": "Mannschaften"
   },
   "player": {
     "player": "Spieler",

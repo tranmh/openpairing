@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { useDebouncedCallback } from 'use-debounce';
+import { useLanguageStore } from '@/store/language';
 
 interface PlayerSearchProps {
   onSearch?: (query: string) => void;
@@ -12,9 +13,11 @@ interface PlayerSearchProps {
 
 export function PlayerSearch({
   onSearch,
-  placeholder = 'Spieler suchen...',
+  placeholder,
   autoFocus = false,
 }: PlayerSearchProps) {
+  const { t } = useLanguageStore();
+  const searchPlaceholder = placeholder || t('player.searchPlayers');
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -64,7 +67,7 @@ export function PlayerSearch({
         type="text"
         value={query}
         onChange={handleChange}
-        placeholder={placeholder}
+        placeholder={searchPlaceholder}
         autoFocus={autoFocus}
         className="block w-full pl-10 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
       />
@@ -98,8 +101,9 @@ interface FederationFilterProps {
 }
 
 export function FederationFilter({ selected, onChange }: FederationFilterProps) {
+  const { t } = useLanguageStore();
   const federations = [
-    { value: '', label: 'Alle' },
+    { value: '', label: t('common.all') },
     { value: 'fide', label: 'FIDE' },
     { value: 'dsb', label: 'DSB' },
     { value: 'oesb', label: 'ÖSB' },
@@ -135,6 +139,7 @@ export function RatingRangeFilter({
   maxRating,
   onChange,
 }: RatingRangeFilterProps) {
+  const { t } = useLanguageStore();
   const [min, setMin] = useState(minRating?.toString() ?? '');
   const [max, setMax] = useState(maxRating?.toString() ?? '');
 
@@ -151,7 +156,7 @@ export function RatingRangeFilter({
         type="number"
         value={min}
         onChange={(e) => setMin(e.target.value)}
-        placeholder="Min"
+        placeholder={t('common.min')}
         className="w-20 px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
       />
       <span className="text-gray-500">-</span>
@@ -159,14 +164,14 @@ export function RatingRangeFilter({
         type="number"
         value={max}
         onChange={(e) => setMax(e.target.value)}
-        placeholder="Max"
+        placeholder={t('common.max')}
         className="w-20 px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
       />
       <button
         onClick={handleApply}
         className="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700"
       >
-        Anwenden
+        {t('common.apply')}
       </button>
     </div>
   );

@@ -3,31 +3,58 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/auth';
+import { useLanguageStore } from '@/store/language';
 import { cn } from '@/lib/utils';
+import type { Locale } from '@/i18n/config';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
 }
 
-const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
-  { name: 'Turniere', href: '/dashboard/tournaments', icon: TrophyIcon },
-  { name: 'Spieler', href: '/dashboard/players', icon: UsersIcon },
-  { name: 'Mannschaften', href: '/dashboard/teams', icon: TeamIcon },
+interface NavItem {
+  key: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+const navigationItems: NavItem[] = [
+  { key: 'dashboard', href: '/dashboard', icon: HomeIcon },
+  { key: 'tournaments', href: '/dashboard/tournaments', icon: TrophyIcon },
+  { key: 'players', href: '/dashboard/players', icon: UsersIcon },
+  { key: 'teams', href: '/dashboard/teams', icon: TeamIcon },
 ];
 
-const userNavigation = [
-  { name: 'Profil', href: '/dashboard/profile' },
-  { name: 'Einstellungen', href: '/dashboard/settings' },
+interface UserNavItem {
+  key: string;
+  href: string;
+}
+
+const userNavigationItems: UserNavItem[] = [
+  { key: 'profile', href: '/dashboard/profile' },
+  { key: 'settings', href: '/dashboard/settings' },
 ];
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
+  const { t } = useLanguageStore();
 
   const handleLogout = async () => {
     await logout();
     window.location.href = '/';
+  };
+
+  const getNavLabel = (key: string): string => {
+    return t(`nav.${key}`);
+  };
+
+  const getUserNavLabel = (key: string): string => {
+    return t(`user.${key}`);
+  };
+
+  const getRoleDisplay = (role?: string): string => {
+    if (!role) return '';
+    return t(`user.role.${role}`);
   };
 
   return (
@@ -43,9 +70,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
             {/* Main Navigation */}
             <nav className="hidden md:flex md:gap-6">
-              {navigation.map((item) => (
+              {navigationItems.map((item) => (
                 <Link
-                  key={item.name}
+                  key={item.key}
                   href={item.href}
                   className={cn(
                     'flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary',
@@ -55,7 +82,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                   )}
                 >
                   <item.icon className="h-4 w-4" />
-                  {item.name}
+                  {getNavLabel(item.key)}
                 </Link>
               ))}
             </nav>
@@ -81,13 +108,13 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                   <div className="px-4 py-2 text-xs text-muted-foreground">
                     {getRoleDisplay(user?.role)}
                   </div>
-                  {userNavigation.map((item) => (
+                  {userNavigationItems.map((item) => (
                     <Link
-                      key={item.name}
+                      key={item.key}
                       href={item.href}
                       className="block px-4 py-2 text-sm hover:bg-muted"
                     >
-                      {item.name}
+                      {getUserNavLabel(item.key)}
                     </Link>
                   ))}
                   <hr className="my-1" />
@@ -95,7 +122,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                     onClick={handleLogout}
                     className="block w-full px-4 py-2 text-left text-sm text-destructive hover:bg-muted"
                   >
-                    Abmelden
+                    {t('auth.logout')}
                   </button>
                 </div>
               </div>
@@ -107,9 +134,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Mobile Navigation */}
       <nav className="border-b bg-background md:hidden">
         <div className="flex overflow-x-auto px-4 py-2">
-          {navigation.map((item) => (
+          {navigationItems.map((item) => (
             <Link
-              key={item.name}
+              key={item.key}
               href={item.href}
               className={cn(
                 'flex items-center gap-1 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium',
@@ -119,7 +146,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               )}
             >
               <item.icon className="h-4 w-4" />
-              {item.name}
+              {getNavLabel(item.key)}
             </Link>
           ))}
         </div>
@@ -134,29 +161,22 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 }
 
 function LanguageSwitcher() {
+  const { locale, setLocale } = useLanguageStore();
+
+  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setLocale(e.target.value as Locale);
+  };
+
   return (
     <select
       className="rounded-md border bg-background px-2 py-1 text-sm"
-      defaultValue="de"
-      onChange={(e) => {
-        // TODO: Implement language switching
-        console.log('Language:', e.target.value);
-      }}
+      value={locale}
+      onChange={handleChange}
     >
       <option value="de">DE</option>
       <option value="en">EN</option>
     </select>
   );
-}
-
-function getRoleDisplay(role?: string): string {
-  const roles: Record<string, string> = {
-    player: 'Spieler',
-    arbiter: 'Schiedsrichter',
-    organizer: 'Veranstalter',
-    admin: 'Administrator',
-  };
-  return roles[role || ''] || role || '';
 }
 
 // Icons

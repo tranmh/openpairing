@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Chess } from 'chess.js';
 import { cn } from '@/lib/utils';
+import { useLanguageStore } from '@/store/language';
 
 interface MoveListProps {
   moves: string[];
@@ -23,6 +24,7 @@ export function MoveList({
   onMoveClick,
   className,
 }: MoveListProps) {
+  const { t } = useLanguageStore();
   const listRef = useRef<HTMLDivElement>(null);
 
   // Convert UCI moves to SAN notation
@@ -108,7 +110,7 @@ export function MoveList({
   if (moves.length === 0) {
     return (
       <div className={cn('flex items-center justify-center p-4 text-gray-500', className)}>
-        No moves yet
+        {t('chess.noMovesYet')}
       </div>
     );
   }

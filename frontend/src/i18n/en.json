@@ -22,7 +22,41 @@
     "error": "Error",
     "success": "Success",
     "warning": "Warning",
-    "info": "Information"
+    "info": "Information",
+    "min": "Min",
+    "max": "Max",
+    "noResults": "No results",
+    "all": "All",
+    "apply": "Apply"
+  },
+  "chess": {
+    "white": "White",
+    "black": "Black",
+    "game": "Game",
+    "games": "Games",
+    "moves": "Moves",
+    "noMovesYet": "No moves yet",
+    "rematch": "Rematch",
+    "newGame": "New Game"
+  },
+  "game": {
+    "result": {
+      "youWon": "You won!",
+      "youLost": "You lost",
+      "draw": "Draw",
+      "aborted": "Game Aborted"
+    },
+    "termination": {
+      "checkmate": "Checkmate",
+      "resignation": "Resignation",
+      "timeout": "Time out",
+      "drawByAgreement": "Draw by agreement",
+      "stalemate": "Stalemate",
+      "insufficientMaterial": "Insufficient material",
+      "threefoldRepetition": "Threefold repetition",
+      "fiftyMoveRule": "Fifty-move rule",
+      "aborted": "Game aborted"
+    }
   },
   "auth": {
     "login": "Login",
@@ -44,7 +78,19 @@
     "settings": "Settings",
     "firstName": "First Name",
     "lastName": "Last Name",
-    "language": "Language"
+    "language": "Language",
+    "role": {
+      "player": "Player",
+      "arbiter": "Arbiter",
+      "organizer": "Organizer",
+      "admin": "Administrator"
+    }
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "tournaments": "Tournaments",
+    "players": "Players",
+    "teams": "Teams"
   },
   "player": {
     "player": "Player",
