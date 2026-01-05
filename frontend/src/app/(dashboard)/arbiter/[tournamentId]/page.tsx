@@ -37,6 +37,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  Copy,
   Edit2,
   MessageSquare,
   PlayCircle,
@@ -50,10 +51,21 @@ import {
   Trash2,
   ArrowLeftRight,
   Plus,
+  Ban,
+  Trophy,
+  Star,
+  Search,
 } from 'lucide-react';
-import { api } from '@/lib/api';
+import {
+  api,
+  tournamentsApi,
+  federationApi,
+  type FederationPlayer,
+  type SpecialRanking,
+} from '@/lib/api';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { useDebounce } from 'use-debounce';
 
 interface TournamentStatus {
   tournament: {
@@ -260,6 +272,10 @@ export default function ArbiterConsolePage() {
             <Settings className="mr-2 h-4 w-4" />
             Aktionen
           </TabsTrigger>
+          <TabsTrigger value="settings">
+            <Trophy className="mr-2 h-4 w-4" />
+            Einstellungen
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="games">
@@ -298,6 +314,15 @@ export default function ArbiterConsolePage() {
           <ActionsTab
             tournamentId={tournamentId}
             currentRound={status.currentRound}
+            participants={status.participants}
+            tournamentRounds={status.tournament.rounds}
+          />
+        </TabsContent>
+
+        <TabsContent value="settings">
+          <SettingsTab
+            tournamentId={tournamentId}
+            tournamentName={status.tournament.name}
             participants={status.participants}
           />
         </TabsContent>
@@ -538,7 +563,7 @@ function ParticipantsTab({
                   <th className="text-left py-2 px-2">Spieler</th>
                   <th className="text-right py-2 px-2">Rating</th>
                   <th className="text-right py-2 px-2">Punkte</th>
-                  <th className="w-20"></th>
+                  <th className="w-24 text-center py-2 px-2">Aktionen</th>
                 </tr>
               </thead>
               <tbody>
@@ -548,13 +573,19 @@ function ParticipantsTab({
                     <td className="py-2 px-2">{p.playerId}</td>
                     <td className="text-right py-2 px-2">{p.startingRating}</td>
                     <td className="text-right py-2 px-2">{p.points}</td>
-                    <td className="py-2 px-2">
+                    <td className="py-2 px-2 flex justify-center gap-1">
+                      <RatingOverrideDialog
+                        tournamentId={tournamentId}
+                        participantId={p.id}
+                        playerName={p.playerId}
+                        currentRating={p.startingRating}
+                      />
                       <Dialog
                         open={withdrawing === p.id}
                         onOpenChange={(open) => setWithdrawing(open ? p.id : null)}
                       >
                         <DialogTrigger asChild>
-                          <Button variant="ghost" size="sm">
+                          <Button variant="ghost" size="sm" title="Spieler zurückziehen">
                             <UserMinus className="h-4 w-4" />
                           </Button>
                         </DialogTrigger>
@@ -641,10 +672,12 @@ function ActionsTab({
   tournamentId,
   currentRound,
   participants,
+  tournamentRounds,
 }: {
   tournamentId: string;
   currentRound?: TournamentStatus['currentRound'];
   participants: TournamentStatus['participants'];
+  tournamentRounds: number;
 }) {
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -673,6 +706,22 @@ function ActionsTab({
         </CardHeader>
         <CardContent>
           <CorrectResultForm tournamentId={tournamentId} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Nachnennung</CardTitle>
+          <CardDescription>
+            Fügen Sie einen Spieler nachträglich zum laufenden Turnier hinzu
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <LateEntryDialog
+            tournamentId={tournamentId}
+            currentRoundNumber={currentRound?.roundNumber || 2}
+            tournamentRounds={tournamentRounds}
+          />
         </CardContent>
       </Card>
     </div>
@@ -1813,6 +1862,961 @@ function ReactivatePlayerDialog({
             disabled={mutation.isPending}
           >
             Reaktivieren
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function LateEntryDialog({
+  tournamentId,
+  currentRoundNumber,
+  tournamentRounds,
+}: {
+  tournamentId: string;
+  currentRoundNumber: number;
+  tournamentRounds: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [debouncedSearch] = useDebounce(search, 300);
+  const [selectedPlayer, setSelectedPlayer] = useState<FederationPlayer | null>(null);
+  const [entryRound, setEntryRound] = useState(String(currentRoundNumber));
+  const [startingRating, setStartingRating] = useState('');
+  const queryClient = useQueryClient();
+
+  const { data: searchResults, isLoading: searchLoading } = useQuery({
+    queryKey: ['federation', 'search', debouncedSearch],
+    queryFn: async () => {
+      const response = await federationApi.search(debouncedSearch, 'dsb', 10);
+      if (response.error) throw new Error(response.error.message);
+      return response.data;
+    },
+    enabled: debouncedSearch.length >= 2,
+  });
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedPlayer) throw new Error('Kein Spieler ausgewählt');
+      const response = await tournamentsApi.addLateEntry(tournamentId, {
+        dsbId: selectedPlayer.id, // Federation ID (PKZ) for import
+        entryRound: parseInt(entryRound),
+        startingRating: startingRating ? parseInt(startingRating) : undefined,
+      });
+      if (response.error) throw new Error(response.error.message);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['arbiter-status', tournamentId] });
+      toast.success('Nachnennung erfolgreich');
+      setOpen(false);
+      resetForm();
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Fehler bei der Nachnennung');
+    },
+  });
+
+  const resetForm = () => {
+    setSearch('');
+    setSelectedPlayer(null);
+    setEntryRound(String(currentRoundNumber));
+    setStartingRating('');
+  };
+
+  const handleSelectPlayer = (player: FederationPlayer) => {
+    setSelectedPlayer(player);
+    setSearch(`${player.firstName || ''} ${player.name}`.trim());
+    setStartingRating(String(player.rating || player.fideRating || ''));
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(isOpen) => {
+      setOpen(isOpen);
+      if (!isOpen) resetForm();
+    }}>
+      <DialogTrigger asChild>
+        <Button>
+          <UserPlus className="mr-2 h-4 w-4" />
+          Nachnennung
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Nachnennung</DialogTitle>
+          <DialogDescription>
+            Fügen Sie einen Spieler nachträglich zum laufenden Turnier hinzu.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Spieler suchen (Portal64)</Label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="pl-10"
+                placeholder="Name eingeben..."
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  if (selectedPlayer) setSelectedPlayer(null);
+                }}
+              />
+            </div>
+            {searchLoading && (
+              <p className="text-sm text-muted-foreground">Suche...</p>
+            )}
+            {!selectedPlayer && searchResults?.results && searchResults.results.length > 0 && (
+              <div className="border rounded-md max-h-48 overflow-y-auto">
+                {searchResults.results.map((player) => (
+                  <button
+                    key={player.id}
+                    type="button"
+                    className="w-full px-3 py-2 text-left hover:bg-muted text-sm border-b last:border-b-0"
+                    onClick={() => handleSelectPlayer(player)}
+                  >
+                    <div className="font-medium">
+                      {player.firstName} {player.name}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {player.club && `${player.club} · `}
+                      DWZ: {player.rating || '-'}
+                      {player.fideRating && ` · FIDE: ${player.fideRating}`}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedPlayer && (
+              <div className="p-3 bg-muted rounded-md">
+                <div className="font-medium">
+                  {selectedPlayer.firstName} {selectedPlayer.name}
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {selectedPlayer.club && `${selectedPlayer.club} · `}
+                  DWZ: {selectedPlayer.rating || '-'}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Einstiegsrunde</Label>
+            {currentRoundNumber < 2 ? (
+              <p className="text-sm text-muted-foreground py-2">
+                Nachnennung erst ab Runde 2 möglich.
+              </p>
+            ) : (
+              <>
+                <Select value={entryRound} onValueChange={setEntryRound}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: currentRoundNumber - 1 }, (_, i) => i + 2)
+                      .map((r) => (
+                        <SelectItem key={r} value={String(r)}>
+                          Runde {r}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Für Runden vor dem Einstieg werden Freilose vergeben.
+                </p>
+              </>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Startrating</Label>
+            <Input
+              type="number"
+              min="0"
+              max="3000"
+              value={startingRating}
+              onChange={(e) => setStartingRating(e.target.value)}
+              placeholder="Wird aus Portal64 übernommen"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Abbrechen
+          </Button>
+          <Button
+            onClick={() => mutation.mutate()}
+            disabled={!selectedPlayer || currentRoundNumber < 2 || mutation.isPending}
+          >
+            Hinzufügen
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SettingsTab({
+  tournamentId,
+  tournamentName,
+  participants,
+}: {
+  tournamentId: string;
+  tournamentName: string;
+  participants: TournamentStatus['participants'];
+}) {
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-lg font-semibold">Turniereinstellungen</h2>
+        <CloneTournamentDialog
+          tournamentId={tournamentId}
+          tournamentName={tournamentName}
+        />
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-2">
+        <ForbiddenPairsCard
+          tournamentId={tournamentId}
+          participants={participants}
+        />
+        <SpecialRankingsCard tournamentId={tournamentId} />
+      </div>
+    </div>
+  );
+}
+
+function CloneTournamentDialog({
+  tournamentId,
+  tournamentName,
+}: {
+  tournamentId: string;
+  tournamentName: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(`Kopie von ${tournamentName}`);
+  const [description, setDescription] = useState('');
+  const [startDate, setStartDate] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const response = await tournamentsApi.cloneTournament(tournamentId, {
+        name,
+        description: description || undefined,
+        startDate: startDate || undefined,
+      });
+      if (response.error) throw new Error(response.error.message);
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success('Turnier wurde geklont');
+      setOpen(false);
+      if (data?.tournament?.id) {
+        window.open(`/tournaments/${data.tournament.id}`, '_blank');
+      }
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Fehler beim Klonen');
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={(isOpen) => {
+      setOpen(isOpen);
+      if (isOpen) {
+        setName(`Kopie von ${tournamentName}`);
+        setDescription('');
+        setStartDate('');
+      }
+    }}>
+      <DialogTrigger asChild>
+        <Button variant="outline">
+          <Copy className="mr-2 h-4 w-4" />
+          Turnier klonen
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Turnier klonen</DialogTitle>
+          <DialogDescription>
+            Erstellen Sie eine Kopie des Turniers mit allen Einstellungen.
+            Teilnehmer werden nicht kopiert.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Name des neuen Turniers</Label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Turniername"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Beschreibung (optional)</Label>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Beschreibung des neuen Turniers"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Startdatum (optional)</Label>
+            <Input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Standard: 1 Jahr nach dem Originalturnier
+            </p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Abbrechen
+          </Button>
+          <Button
+            onClick={() => mutation.mutate()}
+            disabled={!name || mutation.isPending}
+          >
+            Klonen
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ForbiddenPairsCard({
+  tournamentId,
+  participants,
+}: {
+  tournamentId: string;
+  participants: TournamentStatus['participants'];
+}) {
+  const queryClient = useQueryClient();
+  const [addOpen, setAddOpen] = useState(false);
+  const [player1, setPlayer1] = useState('');
+  const [player2, setPlayer2] = useState('');
+  const [reason, setReason] = useState('');
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['forbidden-pairs', tournamentId],
+    queryFn: async () => {
+      const response = await tournamentsApi.getForbiddenPairs(tournamentId);
+      if (response.error) throw new Error(response.error.message);
+      return response.data;
+    },
+  });
+
+  const addMutation = useMutation({
+    mutationFn: async () => {
+      if (!player1 || !player2) throw new Error('Beide Spieler auswählen');
+      if (player1 === player2) throw new Error('Spieler müssen unterschiedlich sein');
+      // API expects participant IDs (despite field name "player1Id/player2Id")
+      const response = await tournamentsApi.addForbiddenPair(tournamentId, {
+        player1Id: player1,
+        player2Id: player2,
+        reason: reason || undefined,
+      });
+      if (response.error) throw new Error(response.error.message);
+      // Returns 201 with no body, success is indicated by no error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['forbidden-pairs', tournamentId] });
+      toast.success('Verbotene Paarung hinzugefügt');
+      setAddOpen(false);
+      setPlayer1('');
+      setPlayer2('');
+      setReason('');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Fehler beim Hinzufügen');
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: async (pairId: string) => {
+      const response = await tournamentsApi.removeForbiddenPair(tournamentId, pairId);
+      if (response.error) throw new Error(response.error.message);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['forbidden-pairs', tournamentId] });
+      toast.success('Verbotene Paarung entfernt');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Fehler beim Entfernen');
+    },
+  });
+
+  const forbiddenPairs = data?.forbiddenPairs || [];
+  const activeParticipants = participants.filter((p) => p.isActive);
+
+  const getParticipantName = (id: string) => {
+    const p = participants.find((p) => p.id === id || p.playerId === id);
+    return p?.playerId || id;
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Ban className="h-5 w-5" />
+              Verbotene Paarungen
+            </CardTitle>
+            <CardDescription>
+              Diese Spieler dürfen nicht gegeneinander gepaart werden
+            </CardDescription>
+          </div>
+          <Dialog open={addOpen} onOpenChange={setAddOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm">
+                <Plus className="mr-2 h-4 w-4" />
+                Hinzufügen
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Verbotene Paarung hinzufügen</DialogTitle>
+                <DialogDescription>
+                  Wählen Sie zwei Spieler, die nicht gegeneinander gepaart werden sollen.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label>Spieler 1</Label>
+                  <Select value={player1} onValueChange={setPlayer1}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Spieler auswählen" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {activeParticipants.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.playerId} ({p.startingRating})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Spieler 2</Label>
+                  <Select value={player2} onValueChange={setPlayer2}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Spieler auswählen" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {activeParticipants
+                        .filter((p) => p.id !== player1)
+                        .map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.playerId} ({p.startingRating})
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Grund (optional)</Label>
+                  <Input
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder="z.B. Teammitglieder, Verwandte"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setAddOpen(false)}>
+                  Abbrechen
+                </Button>
+                <Button
+                  onClick={() => addMutation.mutate()}
+                  disabled={!player1 || !player2 || addMutation.isPending}
+                >
+                  Hinzufügen
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <Skeleton className="h-20" />
+        ) : forbiddenPairs.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">
+            Keine verbotenen Paarungen definiert
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {forbiddenPairs.map((pair) => (
+              <div
+                key={pair.id}
+                className="flex items-center justify-between p-2 border rounded-md"
+              >
+                <div>
+                  <span className="font-medium">
+                    {pair.player1Name || getParticipantName(pair.player1Id)}
+                  </span>
+                  <span className="mx-2 text-muted-foreground">vs</span>
+                  <span className="font-medium">
+                    {pair.player2Name || getParticipantName(pair.player2Id)}
+                  </span>
+                  {pair.reason && (
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      ({pair.reason})
+                    </span>
+                  )}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => removeMutation.mutate(pair.id)}
+                  disabled={removeMutation.isPending}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SpecialRankingsCard({ tournamentId }: { tournamentId: string }) {
+  const queryClient = useQueryClient();
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingRanking, setEditingRanking] = useState<SpecialRanking | null>(null);
+
+  // Form state
+  const [name, setName] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [minBirthYear, setMinBirthYear] = useState('');
+  const [maxBirthYear, setMaxBirthYear] = useState('');
+  const [minRating, setMinRating] = useState('');
+  const [maxRating, setMaxRating] = useState('');
+  const [gender, setGender] = useState('');
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['special-rankings', tournamentId],
+    queryFn: async () => {
+      const response = await tournamentsApi.getSpecialRankings(tournamentId);
+      if (response.error) throw new Error(response.error.message);
+      return response.data;
+    },
+  });
+
+  const resetForm = () => {
+    setName('');
+    setDisplayName('');
+    setMinBirthYear('');
+    setMaxBirthYear('');
+    setMinRating('');
+    setMaxRating('');
+    setGender('');
+    setEditingRanking(null);
+  };
+
+  const openCreateDialog = () => {
+    resetForm();
+    setEditOpen(true);
+  };
+
+  const openEditDialog = (ranking: SpecialRanking) => {
+    setEditingRanking(ranking);
+    setName(ranking.name);
+    setDisplayName(ranking.displayName);
+    setMinBirthYear(ranking.minBirthYear?.toString() || '');
+    setMaxBirthYear(ranking.maxBirthYear?.toString() || '');
+    setMinRating(ranking.minRating?.toString() || '');
+    setMaxRating(ranking.maxRating?.toString() || '');
+    setGender(ranking.gender || '');
+    setEditOpen(true);
+  };
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const response = await tournamentsApi.createSpecialRanking(tournamentId, {
+        name,
+        displayName,
+        minBirthYear: minBirthYear ? parseInt(minBirthYear) : undefined,
+        maxBirthYear: maxBirthYear ? parseInt(maxBirthYear) : undefined,
+        minRating: minRating ? parseInt(minRating) : undefined,
+        maxRating: maxRating ? parseInt(maxRating) : undefined,
+        gender: gender || undefined,
+        sortOrder: (data?.rankings?.length || 0) + 1,
+      });
+      if (response.error) throw new Error(response.error.message);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['special-rankings', tournamentId] });
+      toast.success('Sonderwertung erstellt');
+      setEditOpen(false);
+      resetForm();
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Fehler beim Erstellen');
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingRanking) throw new Error('Keine Wertung ausgewählt');
+      const response = await tournamentsApi.updateSpecialRanking(
+        tournamentId,
+        editingRanking.id,
+        {
+          name,
+          displayName,
+          minBirthYear: minBirthYear ? parseInt(minBirthYear) : undefined,
+          maxBirthYear: maxBirthYear ? parseInt(maxBirthYear) : undefined,
+          minRating: minRating ? parseInt(minRating) : undefined,
+          maxRating: maxRating ? parseInt(maxRating) : undefined,
+          gender: gender || undefined,
+        }
+      );
+      if (response.error) throw new Error(response.error.message);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['special-rankings', tournamentId] });
+      toast.success('Sonderwertung aktualisiert');
+      setEditOpen(false);
+      resetForm();
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Fehler beim Aktualisieren');
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (rankingId: string) => {
+      const response = await tournamentsApi.deleteSpecialRanking(tournamentId, rankingId);
+      if (response.error) throw new Error(response.error.message);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['special-rankings', tournamentId] });
+      toast.success('Sonderwertung gelöscht');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Fehler beim Löschen');
+    },
+  });
+
+  const rankings = data?.rankings || [];
+
+  const getFilterDescription = (ranking: SpecialRanking) => {
+    const parts: string[] = [];
+    if (ranking.minBirthYear || ranking.maxBirthYear) {
+      if (ranking.minBirthYear && ranking.maxBirthYear) {
+        parts.push(`Jahrgang ${ranking.minBirthYear}-${ranking.maxBirthYear}`);
+      } else if (ranking.minBirthYear) {
+        parts.push(`Ab Jahrgang ${ranking.minBirthYear}`);
+      } else {
+        parts.push(`Bis Jahrgang ${ranking.maxBirthYear}`);
+      }
+    }
+    if (ranking.minRating || ranking.maxRating) {
+      if (ranking.minRating && ranking.maxRating) {
+        parts.push(`Rating ${ranking.minRating}-${ranking.maxRating}`);
+      } else if (ranking.minRating) {
+        parts.push(`Rating ab ${ranking.minRating}`);
+      } else {
+        parts.push(`Rating bis ${ranking.maxRating}`);
+      }
+    }
+    if (ranking.gender) {
+      parts.push(ranking.gender === 'female' ? 'Frauen' : 'Männer');
+    }
+    return parts.length > 0 ? parts.join(', ') : 'Alle Teilnehmer';
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Trophy className="h-5 w-5" />
+              Sonderwertungen
+            </CardTitle>
+            <CardDescription>
+              Separate Ranglisten für bestimmte Spielergruppen
+            </CardDescription>
+          </div>
+          <Button size="sm" onClick={openCreateDialog}>
+            <Plus className="mr-2 h-4 w-4" />
+            Neu
+          </Button>
+          <Dialog open={editOpen} onOpenChange={(open) => {
+            setEditOpen(open);
+            if (!open) resetForm();
+          }}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>
+                  {editingRanking ? 'Sonderwertung bearbeiten' : 'Neue Sonderwertung'}
+                </DialogTitle>
+                <DialogDescription>
+                  Definieren Sie Filterkriterien für die Sonderwertung.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Interner Name</Label>
+                    <Input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="z.B. u14"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Anzeigename</Label>
+                    <Input
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      placeholder="z.B. U14 Wertung"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Jahrgang von</Label>
+                    <Input
+                      type="number"
+                      value={minBirthYear}
+                      onChange={(e) => setMinBirthYear(e.target.value)}
+                      placeholder="z.B. 2010"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Jahrgang bis</Label>
+                    <Input
+                      type="number"
+                      value={maxBirthYear}
+                      onChange={(e) => setMaxBirthYear(e.target.value)}
+                      placeholder="z.B. 2014"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Rating von</Label>
+                    <Input
+                      type="number"
+                      value={minRating}
+                      onChange={(e) => setMinRating(e.target.value)}
+                      placeholder="z.B. 1000"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Rating bis</Label>
+                    <Input
+                      type="number"
+                      value={maxRating}
+                      onChange={(e) => setMaxRating(e.target.value)}
+                      placeholder="z.B. 1600"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Geschlecht</Label>
+                  <Select value={gender || 'all'} onValueChange={(v) => setGender(v === 'all' ? '' : v)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Alle" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Alle</SelectItem>
+                      <SelectItem value="female">Frauen</SelectItem>
+                      <SelectItem value="male">Männer</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setEditOpen(false)}>
+                  Abbrechen
+                </Button>
+                <Button
+                  onClick={() => editingRanking ? updateMutation.mutate() : createMutation.mutate()}
+                  disabled={!name || !displayName || createMutation.isPending || updateMutation.isPending}
+                >
+                  {editingRanking ? 'Speichern' : 'Erstellen'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <Skeleton className="h-20" />
+        ) : rankings.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">
+            Keine Sonderwertungen definiert
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {rankings.map((ranking) => (
+              <div
+                key={ranking.id}
+                className="flex items-center justify-between p-2 border rounded-md"
+              >
+                <div>
+                  <span className="font-medium">{ranking.displayName}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {getFilterDescription(ranking)}
+                  </span>
+                </div>
+                <div className="flex gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => openEditDialog(ranking)}
+                  >
+                    <Edit2 className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => deleteMutation.mutate(ranking.id)}
+                    disabled={deleteMutation.isPending}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RatingOverrideDialog({
+  tournamentId,
+  participantId,
+  playerName,
+  currentRating,
+  hasOverride,
+}: {
+  tournamentId: string;
+  participantId: string;
+  playerName: string;
+  currentRating: number;
+  hasOverride?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [rating, setRating] = useState(String(currentRating));
+  const queryClient = useQueryClient();
+
+  const setMutation = useMutation({
+    mutationFn: async () => {
+      const ratingValue = parseInt(rating);
+      if (isNaN(ratingValue) || ratingValue < 0) {
+        throw new Error('Ungültiger Rating-Wert');
+      }
+      const response = await tournamentsApi.setRatingOverride(
+        tournamentId,
+        participantId,
+        ratingValue
+      );
+      if (response.error) throw new Error(response.error.message);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['arbiter-status', tournamentId] });
+      toast.success('Rating überschrieben');
+      setOpen(false);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Fehler beim Überschreiben');
+    },
+  });
+
+  const clearMutation = useMutation({
+    mutationFn: async () => {
+      const response = await tournamentsApi.clearRatingOverride(tournamentId, participantId);
+      if (response.error) throw new Error(response.error.message);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['arbiter-status', tournamentId] });
+      toast.success('Rating-Überschreibung entfernt');
+      setOpen(false);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Fehler beim Entfernen');
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={(isOpen) => {
+      setOpen(isOpen);
+      if (isOpen) setRating(String(currentRating));
+    }}>
+      <DialogTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          title="Rating überschreiben"
+          className={cn(hasOverride && 'text-orange-500')}
+        >
+          <Star className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Rating überschreiben</DialogTitle>
+          <DialogDescription>
+            {playerName} - Aktuelles Rating: {currentRating}
+            {hasOverride && ' (überschrieben)'}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Neues Rating</Label>
+            <Input
+              type="number"
+              min="0"
+              max="3000"
+              value={rating}
+              onChange={(e) => setRating(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Dieses Rating wird für die Paarungen verwendet.
+            </p>
+          </div>
+        </div>
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          {hasOverride && (
+            <Button
+              variant="outline"
+              onClick={() => clearMutation.mutate()}
+              disabled={clearMutation.isPending}
+              className="sm:mr-auto"
+            >
+              Zurücksetzen
+            </Button>
+          )}
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Abbrechen
+          </Button>
+          <Button
+            onClick={() => setMutation.mutate()}
+            disabled={!rating || setMutation.isPending}
+          >
+            Speichern
           </Button>
         </DialogFooter>
       </DialogContent>

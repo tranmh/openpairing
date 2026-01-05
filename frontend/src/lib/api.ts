@@ -210,6 +210,7 @@ export interface TournamentParticipant {
   registrationStatus: 'registered' | 'confirmed' | 'withdrawn' | 'expelled';
   startRank?: number;
   startingRating?: number;
+  manualRatingOverride?: number | null;
   points: number;
   buchholz: number;
   buchholzCut1: number;
@@ -244,6 +245,78 @@ export interface TournamentRound {
   actualStart?: string;
   completedAt?: string;
   status: 'pending' | 'pairing' | 'paired' | 'ongoing' | 'completed';
+}
+
+// Tournament Operations types
+export interface CloneTournamentRequest {
+  name: string;
+  description?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface ForbiddenPair {
+  id: string;
+  tournamentId: string;
+  player1Id: string;
+  player2Id: string;
+  player1Name?: string;
+  player2Name?: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface AddForbiddenPairRequest {
+  player1Id: string;
+  player2Id: string;
+  reason?: string;
+}
+
+export interface SpecialRanking {
+  id: string;
+  tournamentId: string;
+  name: string;
+  displayName: string;
+  minBirthYear?: number;
+  maxBirthYear?: number;
+  minRating?: number;
+  maxRating?: number;
+  gender?: string;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateSpecialRankingRequest {
+  name: string;
+  displayName: string;
+  minBirthYear?: number;
+  maxBirthYear?: number;
+  minRating?: number;
+  maxRating?: number;
+  gender?: string;
+  sortOrder: number;
+}
+
+export interface UpdateSpecialRankingRequest {
+  name?: string;
+  displayName?: string;
+  minBirthYear?: number;
+  maxBirthYear?: number;
+  minRating?: number;
+  maxRating?: number;
+  gender?: string;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export interface LateEntryRequest {
+  playerId?: string;  // UUID of existing player (optional if dsbId provided)
+  dsbId?: string;     // PKZ for importing from DSB/portal64
+  sectionId?: string;
+  startingRating?: number;
+  entryRound: number;
 }
 
 // Auth API
@@ -333,6 +406,38 @@ export const tournamentsApi = {
 
   updateRoundRobinSettings: (id: string, settings: UpdateRoundRobinSettingsRequest) =>
     api.put<RoundRobinSettingsResponse>(`/tournaments/${id}/round-robin-settings`, settings),
+
+  // Clone tournament
+  cloneTournament: (id: string, data: CloneTournamentRequest) =>
+    api.post<{ tournament: Tournament }>(`/tournaments/${id}/clone`, data),
+
+  // Forbidden pairs
+  getForbiddenPairs: (id: string) =>
+    api.get<{ forbiddenPairs: ForbiddenPair[] }>(`/tournaments/${id}/forbidden-pairs`),
+  addForbiddenPair: (id: string, data: AddForbiddenPairRequest) =>
+    api.post<void>(`/tournaments/${id}/forbidden-pairs`, data), // Returns 201 with no body
+  removeForbiddenPair: (id: string, pairId: string) =>
+    api.delete(`/tournaments/${id}/forbidden-pairs/${pairId}`),
+
+  // Special rankings
+  getSpecialRankings: (id: string) =>
+    api.get<{ rankings: SpecialRanking[] }>(`/tournaments/${id}/special-rankings`),
+  createSpecialRanking: (id: string, data: CreateSpecialRankingRequest) =>
+    api.post<{ ranking: SpecialRanking }>(`/tournaments/${id}/special-rankings`, data),
+  updateSpecialRanking: (id: string, rankingId: string, data: UpdateSpecialRankingRequest) =>
+    api.put<{ ranking: SpecialRanking }>(`/tournaments/${id}/special-rankings/${rankingId}`, data),
+  deleteSpecialRanking: (id: string, rankingId: string) =>
+    api.delete(`/tournaments/${id}/special-rankings/${rankingId}`),
+
+  // Rating override
+  setRatingOverride: (id: string, participantId: string, rating: number) =>
+    api.put(`/tournaments/${id}/participants/${participantId}/rating-override`, { rating }),
+  clearRatingOverride: (id: string, participantId: string) =>
+    api.delete(`/tournaments/${id}/participants/${participantId}/rating-override`),
+
+  // Late entry
+  addLateEntry: (id: string, data: LateEntryRequest) =>
+    api.post<{ participant: TournamentParticipant }>(`/tournaments/${id}/late-entry`, data),
 };
 
 // Round Robin types

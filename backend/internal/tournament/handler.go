@@ -1421,10 +1421,27 @@ func (h *Handler) AddLateEntry(c *gin.Context) {
 		return
 	}
 
+	// Validate that at least playerId or dsbId is provided
+	if req.PlayerID == uuid.Nil && req.DsbID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "playerId or dsbId required"})
+		return
+	}
+
 	regReq := &RegisterParticipantRequest{
 		PlayerID:       req.PlayerID,
+		DsbID:          req.DsbID,
 		SectionID:      req.SectionID,
 		StartingRating: req.StartingRating,
+	}
+
+	// If PlayerID is not provided but DsbID is, try to resolve/import player
+	if regReq.PlayerID == uuid.Nil && regReq.DsbID != "" {
+		playerID, importErr := h.resolveOrImportPlayer(c.Request.Context(), regReq)
+		if importErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": importErr.Error()})
+			return
+		}
+		regReq.PlayerID = playerID
 	}
 
 	participant, err := h.service.AddLateEntry(c.Request.Context(), id, regReq, req.EntryRound)
@@ -1622,7 +1639,8 @@ type ByeRequestRequest struct {
 
 // LateEntryRequest for adding a late entry
 type LateEntryRequest struct {
-	PlayerID       uuid.UUID  `json:"playerId" binding:"required"`
+	PlayerID       uuid.UUID  `json:"playerId"`           // UUID of existing player (optional if DsbID provided)
+	DsbID          string     `json:"dsbId,omitempty"`    // PKZ for importing from DSB/portal64
 	SectionID      *uuid.UUID `json:"sectionId"`
 	StartingRating int        `json:"startingRating"`
 	EntryRound     int        `json:"entryRound" binding:"required,min=2"`
