@@ -68,11 +68,21 @@ func (rl *RateLimiter) Allow(key string) bool {
 	return true
 }
 
+// RateLimitEnabled controls whether rate limiting is active globally.
+// Set to false to disable rate limiting (useful for development).
+var RateLimitEnabled = true
+
 // RateLimit returns a gin middleware for rate limiting
 func RateLimit(limit int, window time.Duration) gin.HandlerFunc {
 	limiter := NewRateLimiter(limit, window)
 
 	return func(c *gin.Context) {
+		// Skip rate limiting if disabled
+		if !RateLimitEnabled {
+			c.Next()
+			return
+		}
+
 		key := c.ClientIP()
 
 		if !limiter.Allow(key) {

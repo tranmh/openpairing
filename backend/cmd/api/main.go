@@ -149,6 +149,12 @@ func main() {
 	normReportService := reports.NewNormReportService(reportsDataProvider)
 	reportsHandler := reports.NewHandler(dwzReportService, normReportService, trfReportService, log.Logger)
 
+	// Configure rate limiting
+	middleware.RateLimitEnabled = cfg.RateLimit.Enabled
+	if !cfg.RateLimit.Enabled {
+		log.Warn().Msg("Rate limiting is DISABLED")
+	}
+
 	// Create Gin router
 	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler)
 

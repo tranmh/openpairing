@@ -16,6 +16,7 @@ type Config struct {
 	CORS        CORSConfig
 	Federation  FederationConfig
 	Pairing     PairingConfig
+	RateLimit   RateLimitConfig
 }
 
 type ServerConfig struct {
@@ -81,6 +82,10 @@ type PairingConfig struct {
 	Timeout    time.Duration
 }
 
+type RateLimitConfig struct {
+	Enabled bool
+}
+
 // Load loads configuration from environment variables
 func Load() *Config {
 	return &Config{
@@ -140,6 +145,9 @@ func Load() *Config {
 			JaVaFoPath: getEnv("JAVAFO_PATH", ""),
 			BBPPath:    getEnv("BBP_PATH", ""),
 			Timeout:    getDurationEnv("PAIRING_TIMEOUT", 5*time.Minute),
+		},
+		RateLimit: RateLimitConfig{
+			Enabled: getBoolEnv("RATE_LIMIT_ENABLED", true),
 		},
 	}
 }
