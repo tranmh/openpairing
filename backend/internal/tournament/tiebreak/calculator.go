@@ -24,34 +24,52 @@ const (
 	TBKoya            TiebreakCode = "koya"
 
 	// Additional tiebreaks
-	TBWinsBlack       TiebreakCode = "wins_black"
-	TBRating          TiebreakCode = "rating"
-	TBRatingPerf      TiebreakCode = "rating_performance"
-	TBAvgOppRating    TiebreakCode = "avg_opponent_rating"
+	TBWinsBlack    TiebreakCode = "wins_black"
+	TBRating       TiebreakCode = "rating"
+	TBRatingPerf   TiebreakCode = "rating_performance"
+	TBAvgOppRating TiebreakCode = "avg_opponent_rating"
 )
+
+// ScoringConfig holds scoring settings needed for tiebreak calculations
+type ScoringConfig struct {
+	WinPoints           float64
+	DrawPoints          float64
+	LossPoints          float64
+	SonnebornBergerMode string // "proportional" or "traditional"
+}
+
+// DefaultScoringConfig returns FIDE standard 1-0.5-0 scoring
+func DefaultScoringConfig() *ScoringConfig {
+	return &ScoringConfig{
+		WinPoints:           1.0,
+		DrawPoints:          0.5,
+		LossPoints:          0.0,
+		SonnebornBergerMode: "proportional",
+	}
+}
 
 // PlayerResult represents a player's result against an opponent
 type PlayerResult struct {
-	OpponentID   uuid.UUID
-	Score        float64 // 1.0, 0.5, 0.0
-	OpponentPts  float64 // Opponent's total points
-	PlayedWhite  bool
-	RoundNumber  int
+	OpponentID  uuid.UUID
+	Score       float64 // Display points (e.g., 3, 1, 0 for football scoring)
+	OpponentPts float64 // Opponent's total points
+	PlayedWhite bool
+	RoundNumber int
 }
 
 // PlayerData contains all data needed for tiebreak calculation
 type PlayerData struct {
-	ID             uuid.UUID
-	StartRank      int
-	Rating         int
-	Points         float64
-	Results        []PlayerResult
-	GamesPlayed    int
-	Wins           int
-	Draws          int
-	Losses         int
-	GamesAsBlack   int
-	WinsAsBlack    int
+	ID               uuid.UUID
+	StartRank        int
+	Rating           int
+	Points           float64
+	Results          []PlayerResult
+	GamesPlayed      int
+	Wins             int
+	Draws            int
+	Losses           int
+	GamesAsBlack     int
+	WinsAsBlack      int
 	CumulativePoints []float64 // Points after each round for progress
 }
 
@@ -60,6 +78,7 @@ type Calculator struct {
 	players   map[uuid.UUID]*PlayerData
 	tiebreaks []TiebreakCode
 	rounds    int
+	scoring   *ScoringConfig
 }
 
 // NewCalculator creates a new tiebreak calculator
@@ -68,6 +87,27 @@ func NewCalculator(tiebreaks []TiebreakCode, rounds int) *Calculator {
 		players:   make(map[uuid.UUID]*PlayerData),
 		tiebreaks: tiebreaks,
 		rounds:    rounds,
+		scoring:   DefaultScoringConfig(),
+	}
+}
+
+// NewCalculatorWithScoring creates a new tiebreak calculator with custom scoring
+func NewCalculatorWithScoring(tiebreaks []TiebreakCode, rounds int, scoring *ScoringConfig) *Calculator {
+	if scoring == nil {
+		scoring = DefaultScoringConfig()
+	}
+	return &Calculator{
+		players:   make(map[uuid.UUID]*PlayerData),
+		tiebreaks: tiebreaks,
+		rounds:    rounds,
+		scoring:   scoring,
+	}
+}
+
+// SetScoring updates the scoring configuration
+func (c *Calculator) SetScoring(scoring *ScoringConfig) {
+	if scoring != nil {
+		c.scoring = scoring
 	}
 }
 
@@ -194,15 +234,24 @@ func (c *Calculator) buchholzMedian(player *PlayerData) float64 {
 }
 
 // sonnebornBerger calculates the Sonneborn-Berger score
-// Sum of: opponents' points for wins + half opponents' points for draws
+// Uses scoring settings to determine what constitutes a win/draw/loss
 func (c *Calculator) sonnebornBerger(player *PlayerData) float64 {
 	var sum float64
 
 	for _, result := range player.Results {
-		if result.Score == 1.0 {
+		// Determine result type based on score value
+		if result.Score == c.scoring.WinPoints {
+			// Win: add full opponent points
 			sum += result.OpponentPts
-		} else if result.Score == 0.5 {
-			sum += result.OpponentPts / 2
+		} else if result.Score == c.scoring.DrawPoints {
+			// Draw: add based on SB mode
+			if c.scoring.SonnebornBergerMode == "traditional" {
+				// Traditional: always half for draws
+				sum += result.OpponentPts / 2
+			} else {
+				// Proportional: based on point ratio (draw/win)
+				sum += result.OpponentPts * (c.scoring.DrawPoints / c.scoring.WinPoints)
+			}
 		}
 		// Losses contribute 0
 	}
@@ -273,7 +322,9 @@ func (c *Calculator) aroc(player *PlayerData) float64 {
 // koya calculates the Koya system score
 // Points scored against opponents with >= 50% score
 func (c *Calculator) koya(player *PlayerData) float64 {
-	halfPoints := float64(c.rounds) / 2
+	// Calculate 50% of max possible points
+	// With display scoring, max per round is WinPoints
+	halfPoints := float64(c.rounds) * c.scoring.WinPoints / 2
 
 	var sum float64
 	for _, result := range player.Results {
@@ -309,10 +360,10 @@ func (c *Calculator) avgOpponentRating(player *PlayerData) float64 {
 
 // Standings represents sorted player standings
 type Standing struct {
-	PlayerID   uuid.UUID
-	Rank       int
-	Points     float64
-	Tiebreaks  map[TiebreakCode]float64
+	PlayerID  uuid.UUID
+	Rank      int
+	Points    float64
+	Tiebreaks map[TiebreakCode]float64
 }
 
 // GetStandings returns players sorted by points and tiebreaks

@@ -289,6 +289,13 @@ func (s *Service) UpdateTournament(ctx context.Context, id uuid.UUID, req *Updat
 	if req.Tiebreaks != nil {
 		tournament.Tiebreaks = req.Tiebreaks
 	}
+	if req.ScoringSettings != nil {
+		// Validate scoring settings
+		if errs := req.ScoringSettings.Validate(); len(errs) > 0 {
+			return nil, fmt.Errorf("invalid scoring settings: %s", errs[0].Message)
+		}
+		tournament.ScoringSettings = req.ScoringSettings
+	}
 
 	tournament.UpdatedAt = time.Now()
 
@@ -748,9 +755,13 @@ func (s *Service) GeneratePairings(ctx context.Context, tournamentID uuid.UUID, 
 	}
 
 	// Update participant scores for BYE games
+	scoring := tournament.ScoringSettings
+	if scoring == nil {
+		scoring = DefaultScoringSettings()
+	}
 	for _, game := range games {
 		if game.Result != nil && *game.Result == "BYE" {
-			if err := s.updateParticipantScores(ctx, &game); err != nil {
+			if err := s.updateParticipantScores(ctx, &game, scoring); err != nil {
 				s.logger.Warn().Err(err).Msg("Failed to update BYE participant score")
 			}
 		}
@@ -969,11 +980,15 @@ func (s *Service) EnterResult(ctx context.Context, gameID uuid.UUID, req *EnterR
 		return nil, fmt.Errorf("result already entered")
 	}
 
-	// Parse and validate result
-	whiteScore, blackScore, err := parseResult(req.Result)
-	if err != nil {
-		return nil, err
+	// Get scoring settings
+	scoring := tournament.ScoringSettings
+	if scoring == nil {
+		scoring = DefaultScoringSettings()
 	}
+
+	// Parse and validate result using scoring settings
+	whiteScore, blackScore := ParseResultWithScoring(req.Result, scoring)
+	// Note: ParseResultWithScoring doesn't return error, invalid results default to loss-loss
 
 	now := time.Now()
 	game.Result = &req.Result
@@ -992,7 +1007,7 @@ func (s *Service) EnterResult(ctx context.Context, gameID uuid.UUID, req *EnterR
 	}
 
 	// Update participant scores
-	if err := s.updateParticipantScores(ctx, game); err != nil {
+	if err := s.updateParticipantScores(ctx, game, scoring); err != nil {
 		return nil, err
 	}
 
@@ -1004,33 +1019,22 @@ func (s *Service) EnterResult(ctx context.Context, gameID uuid.UUID, req *EnterR
 	return game, nil
 }
 
-func parseResult(result string) (float64, float64, error) {
-	switch result {
-	case "1-0", "1-0F":
-		return 1, 0, nil
-	case "0-1", "0-1F":
-		return 0, 1, nil
-	case "1/2-1/2":
-		return 0.5, 0.5, nil
-	case "0-0F":
-		return 0, 0, nil
-	case "BYE":
-		return 0.5, 0, nil
-	default:
-		return 0, 0, fmt.Errorf("invalid result: %s", result)
+func (s *Service) updateParticipantScores(ctx context.Context, game *Game, scoring *ScoringSettings) error {
+	if scoring == nil {
+		scoring = DefaultScoringSettings()
 	}
-}
 
-func (s *Service) updateParticipantScores(ctx context.Context, game *Game) error {
 	if game.WhiteParticipantID != nil && game.WhiteScore != nil {
 		participant, err := s.repo.GetParticipant(ctx, *game.WhiteParticipantID)
 		if err != nil {
 			return err
 		}
 		participant.Points += *game.WhiteScore
-		if *game.WhiteScore == 1 {
+
+		// Determine result type using scoring settings
+		if IsWin(*game.WhiteScore, scoring) {
 			participant.Wins++
-		} else if *game.WhiteScore == 0.5 {
+		} else if IsDraw(*game.WhiteScore, scoring) {
 			participant.Draws++
 		} else {
 			participant.Losses++
@@ -1046,9 +1050,11 @@ func (s *Service) updateParticipantScores(ctx context.Context, game *Game) error
 			return err
 		}
 		participant.Points += *game.BlackScore
-		if *game.BlackScore == 1 {
+
+		// Determine result type using scoring settings
+		if IsWin(*game.BlackScore, scoring) {
 			participant.Wins++
-		} else if *game.BlackScore == 0.5 {
+		} else if IsDraw(*game.BlackScore, scoring) {
 			participant.Draws++
 		} else {
 			participant.Losses++
@@ -1886,6 +1892,62 @@ func (s *Service) GetByeSettings(ctx context.Context, tournamentID uuid.UUID) (*
 	return DefaultByeSettings(), nil
 }
 
+// UpdateScoringSettings updates the scoring settings for a tournament
+func (s *Service) UpdateScoringSettings(ctx context.Context, tournamentID uuid.UUID, settings *ScoringSettings) (*Tournament, []FIDEViolation, error) {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Only allow updates before tournament starts (ongoing or later)
+	if tournament.Status == StatusOngoing || tournament.Status == StatusCompleted || tournament.Status == StatusCancelled {
+		return nil, nil, fmt.Errorf("cannot update scoring settings for %s tournament", tournament.Status)
+	}
+
+	// Validate scoring settings
+	if settings != nil {
+		if errs := settings.Validate(); len(errs) > 0 {
+			return nil, nil, fmt.Errorf("invalid scoring settings: %s", errs[0].Message)
+		}
+	}
+
+	tournament.ScoringSettings = settings
+	tournament.UpdatedAt = time.Now()
+
+	if err := s.repo.Update(ctx, tournament); err != nil {
+		return nil, nil, fmt.Errorf("failed to update tournament: %w", err)
+	}
+
+	// Check for FIDE violations and return warnings
+	var violations []FIDEViolation
+	if settings != nil {
+		violations = settings.ValidateFIDECompliance()
+	}
+
+	s.logger.Info().
+		Str("tournament_id", tournamentID.String()).
+		Interface("scoring_settings", settings).
+		Int("fide_violations", len(violations)).
+		Msg("Scoring settings updated")
+
+	return tournament, violations, nil
+}
+
+// GetScoringSettings returns the scoring settings for a tournament (with defaults if not set)
+func (s *Service) GetScoringSettings(ctx context.Context, tournamentID uuid.UUID) (*ScoringSettings, error) {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	if tournament.ScoringSettings != nil {
+		return tournament.ScoringSettings, nil
+	}
+
+	// Return default settings
+	return DefaultScoringSettings(), nil
+}
+
 // RequestHalfPointBye requests a half-point bye for a participant in a specific round
 func (s *Service) RequestHalfPointBye(ctx context.Context, tournamentID, participantID uuid.UUID, roundNumber int) error {
 	tournament, err := s.repo.GetByID(ctx, tournamentID)
@@ -2278,11 +2340,19 @@ func (s *Service) GetFIDEViolations(ctx context.Context, tournamentID uuid.UUID)
 		return nil, err
 	}
 
-	if tournament.ByeSettings == nil {
-		return nil, nil // Default settings are FIDE compliant
+	var violations []FIDEViolation
+
+	// Check bye settings violations
+	if tournament.ByeSettings != nil {
+		violations = append(violations, tournament.ByeSettings.ValidateFIDECompliance(tournament.Rounds)...)
 	}
 
-	return tournament.ByeSettings.ValidateFIDECompliance(tournament.Rounds), nil
+	// Check scoring settings violations
+	if tournament.ScoringSettings != nil {
+		violations = append(violations, tournament.ScoringSettings.ValidateFIDECompliance()...)
+	}
+
+	return violations, nil
 }
 
 // GetParticipantByeStatus returns detailed bye/withdrawal status for a participant

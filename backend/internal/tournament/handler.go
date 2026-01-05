@@ -73,6 +73,10 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 			organizer.PUT("/:id/bye-settings", h.UpdateByeSettings)
 			organizer.GET("/:id/fide-violations", h.GetFIDEViolations)
 
+			// Scoring settings management (organizer only)
+			organizer.GET("/:id/scoring-settings", h.GetScoringSettings)
+			organizer.PUT("/:id/scoring-settings", h.UpdateScoringSettings)
+
 			// Bye request management (organizer only)
 			organizer.POST("/:id/participants/:participantId/bye-request", h.RequestHalfPointBye)
 			organizer.DELETE("/:id/participants/:participantId/bye-request/:round", h.CancelByeRequest)
@@ -905,6 +909,63 @@ func (h *Handler) ClearRatingOverride(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// GetScoringSettings gets scoring settings for a tournament
+// @Summary Get scoring settings
+// @Tags tournaments
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Success 200 {object} ScoringSettingsResponse
+// @Router /tournaments/{id}/scoring-settings [get]
+func (h *Handler) GetScoringSettings(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	settings, err := h.service.GetScoringSettings(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, ScoringSettingsResponse{ScoringSettings: settings})
+}
+
+// UpdateScoringSettings updates scoring settings for a tournament
+// @Summary Update scoring settings
+// @Tags tournaments
+// @Accept json
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param request body ScoringSettings true "Scoring settings"
+// @Success 200 {object} ScoringSettingsUpdateResponse
+// @Router /tournaments/{id}/scoring-settings [put]
+func (h *Handler) UpdateScoringSettings(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	var settings ScoringSettings
+	if err := c.ShouldBindJSON(&settings); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	tournament, violations, err := h.service.UpdateScoringSettings(c.Request.Context(), id, &settings)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, ScoringSettingsUpdateResponse{
+		Tournament:     tournament,
+		FIDEViolations: violations,
+	})
+}
+
 // GetByeSettings gets bye settings for a tournament
 // @Summary Get bye settings
 // @Tags tournaments
@@ -1237,6 +1298,17 @@ type SetRatingOverrideRequest struct {
 // ByeSettingsResponse wraps bye settings
 type ByeSettingsResponse struct {
 	ByeSettings *ByeSettings `json:"byeSettings"`
+}
+
+// ScoringSettingsResponse wraps scoring settings
+type ScoringSettingsResponse struct {
+	ScoringSettings *ScoringSettings `json:"scoringSettings"`
+}
+
+// ScoringSettingsUpdateResponse wraps updated tournament with FIDE violations
+type ScoringSettingsUpdateResponse struct {
+	Tournament     *Tournament     `json:"tournament"`
+	FIDEViolations []FIDEViolation `json:"fideViolations,omitempty"`
 }
 
 // ByeSettingsUpdateResponse wraps updated tournament with FIDE violations

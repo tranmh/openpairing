@@ -120,6 +120,7 @@ func (r *PostgresRepository) Create(ctx context.Context, t *Tournament) error {
 	tiebreaksJSON, _ := json.Marshal(t.Tiebreaks)
 	settingsJSON, _ := json.Marshal(t.Settings)
 	byeSettingsJSON, _ := json.Marshal(t.ByeSettings)
+	scoringSettingsJSON, _ := json.Marshal(t.ScoringSettings)
 
 	query := `
 		INSERT INTO tournaments (
@@ -131,7 +132,7 @@ func (r *PostgresRepository) Create(ctx context.Context, t *Tournament) error {
 			venue_name, venue_address, venue_city, venue_country,
 			fide_rated, dwz_rated, oesb_rated,
 			entry_fee_cents, currency, status,
-			tiebreaks, settings, bye_settings, current_round, participant_count,
+			tiebreaks, settings, bye_settings, scoring_settings, current_round, participant_count,
 			created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5,
@@ -142,8 +143,8 @@ func (r *PostgresRepository) Create(ctx context.Context, t *Tournament) error {
 			$20, $21, $22, $23,
 			$24, $25, $26,
 			$27, $28, $29,
-			$30, $31, $32, $33, $34,
-			$35, $36
+			$30, $31, $32, $33, $34, $35,
+			$36, $37
 		)`
 
 	_, err := r.db.Exec(ctx, query,
@@ -155,7 +156,7 @@ func (r *PostgresRepository) Create(ctx context.Context, t *Tournament) error {
 		t.VenueName, t.VenueAddress, t.VenueCity, t.VenueCountry,
 		t.FideRated, t.DwzRated, t.OesbRated,
 		t.EntryFeeCents, t.Currency, t.Status,
-		tiebreaksJSON, settingsJSON, byeSettingsJSON, t.CurrentRound, t.ParticipantCount,
+		tiebreaksJSON, settingsJSON, byeSettingsJSON, scoringSettingsJSON, t.CurrentRound, t.ParticipantCount,
 		t.CreatedAt, t.UpdatedAt,
 	)
 
@@ -177,12 +178,12 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (*Tourna
 			venue_name, venue_address, venue_city, venue_country,
 			fide_rated, dwz_rated, oesb_rated,
 			entry_fee_cents, currency, status, ratings_locked_at,
-			tiebreaks, settings, bye_settings, current_round, participant_count,
+			tiebreaks, settings, bye_settings, scoring_settings, current_round, participant_count,
 			created_at, updated_at
 		FROM tournaments WHERE id = $1`
 
 	var t Tournament
-	var tiebreaksJSON, settingsJSON, byeSettingsJSON []byte
+	var tiebreaksJSON, settingsJSON, byeSettingsJSON, scoringSettingsJSON []byte
 
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&t.ID, &t.OrganizationID, &t.Name, &t.Description, &t.Slug,
@@ -193,7 +194,7 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (*Tourna
 		&t.VenueName, &t.VenueAddress, &t.VenueCity, &t.VenueCountry,
 		&t.FideRated, &t.DwzRated, &t.OesbRated,
 		&t.EntryFeeCents, &t.Currency, &t.Status, &t.RatingsLockedAt,
-		&tiebreaksJSON, &settingsJSON, &byeSettingsJSON, &t.CurrentRound, &t.ParticipantCount,
+		&tiebreaksJSON, &settingsJSON, &byeSettingsJSON, &scoringSettingsJSON, &t.CurrentRound, &t.ParticipantCount,
 		&t.CreatedAt, &t.UpdatedAt,
 	)
 
@@ -208,6 +209,9 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (*Tourna
 	json.Unmarshal(settingsJSON, &t.Settings)
 	if byeSettingsJSON != nil {
 		json.Unmarshal(byeSettingsJSON, &t.ByeSettings)
+	}
+	if scoringSettingsJSON != nil {
+		json.Unmarshal(scoringSettingsJSON, &t.ScoringSettings)
 	}
 
 	return &t, nil
@@ -232,6 +236,7 @@ func (r *PostgresRepository) Update(ctx context.Context, t *Tournament) error {
 	tiebreaksJSON, _ := json.Marshal(t.Tiebreaks)
 	settingsJSON, _ := json.Marshal(t.Settings)
 	byeSettingsJSON, _ := json.Marshal(t.ByeSettings)
+	scoringSettingsJSON, _ := json.Marshal(t.ScoringSettings)
 
 	query := `
 		UPDATE tournaments SET
@@ -244,9 +249,9 @@ func (r *PostgresRepository) Update(ctx context.Context, t *Tournament) error {
 			venue_name = $14, venue_address = $15, venue_city = $16,
 			fide_rated = $17, dwz_rated = $18, oesb_rated = $19,
 			entry_fee_cents = $20, status = $21, ratings_locked_at = $22,
-			tiebreaks = $23, settings = $24, bye_settings = $25,
-			current_round = $26, participant_count = $27,
-			updated_at = $28
+			tiebreaks = $23, settings = $24, bye_settings = $25, scoring_settings = $26,
+			current_round = $27, participant_count = $28,
+			updated_at = $29
 		WHERE id = $1`
 
 	result, err := r.db.Exec(ctx, query,
@@ -259,7 +264,7 @@ func (r *PostgresRepository) Update(ctx context.Context, t *Tournament) error {
 		t.VenueName, t.VenueAddress, t.VenueCity,
 		t.FideRated, t.DwzRated, t.OesbRated,
 		t.EntryFeeCents, t.Status, t.RatingsLockedAt,
-		tiebreaksJSON, settingsJSON, byeSettingsJSON,
+		tiebreaksJSON, settingsJSON, byeSettingsJSON, scoringSettingsJSON,
 		t.CurrentRound, t.ParticipantCount,
 		t.UpdatedAt,
 	)
@@ -342,7 +347,7 @@ func (r *PostgresRepository) List(ctx context.Context, filters *ListFilters) ([]
 			venue_name, venue_address, venue_city, venue_country,
 			fide_rated, dwz_rated, oesb_rated,
 			entry_fee_cents, currency, status, ratings_locked_at,
-			tiebreaks, settings, bye_settings, current_round, participant_count,
+			tiebreaks, settings, bye_settings, scoring_settings, current_round, participant_count,
 			created_at, updated_at
 		FROM tournaments
 		%s
@@ -359,7 +364,7 @@ func (r *PostgresRepository) List(ctx context.Context, filters *ListFilters) ([]
 	var tournaments []Tournament
 	for rows.Next() {
 		var t Tournament
-		var tiebreaksJSON, settingsJSON, byeSettingsJSON []byte
+		var tiebreaksJSON, settingsJSON, byeSettingsJSON, scoringSettingsJSON []byte
 
 		err := rows.Scan(
 			&t.ID, &t.OrganizationID, &t.Name, &t.Description, &t.Slug,
@@ -370,7 +375,7 @@ func (r *PostgresRepository) List(ctx context.Context, filters *ListFilters) ([]
 			&t.VenueName, &t.VenueAddress, &t.VenueCity, &t.VenueCountry,
 			&t.FideRated, &t.DwzRated, &t.OesbRated,
 			&t.EntryFeeCents, &t.Currency, &t.Status, &t.RatingsLockedAt,
-			&tiebreaksJSON, &settingsJSON, &byeSettingsJSON, &t.CurrentRound, &t.ParticipantCount,
+			&tiebreaksJSON, &settingsJSON, &byeSettingsJSON, &scoringSettingsJSON, &t.CurrentRound, &t.ParticipantCount,
 			&t.CreatedAt, &t.UpdatedAt,
 		)
 		if err != nil {
@@ -381,6 +386,9 @@ func (r *PostgresRepository) List(ctx context.Context, filters *ListFilters) ([]
 		json.Unmarshal(settingsJSON, &t.Settings)
 		if byeSettingsJSON != nil {
 			json.Unmarshal(byeSettingsJSON, &t.ByeSettings)
+		}
+		if scoringSettingsJSON != nil {
+			json.Unmarshal(scoringSettingsJSON, &t.ScoringSettings)
 		}
 
 		tournaments = append(tournaments, t)

@@ -2,6 +2,7 @@ package standings
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -50,6 +51,14 @@ type GameData struct {
 	BlackScore         *float64
 }
 
+// ScoringConfig holds scoring settings for standings calculations
+type ScoringConfig struct {
+	WinPoints           float64
+	DrawPoints          float64
+	LossPoints          float64
+	SonnebornBergerMode string
+}
+
 // TournamentInfo contains tournament information for standings
 type TournamentInfo struct {
 	ID           uuid.UUID
@@ -57,15 +66,17 @@ type TournamentInfo struct {
 	CurrentRound int
 	TotalRounds  int
 	Tiebreaks    []string
+	Scoring      *ScoringConfig
 }
 
 // GetTournamentInfo retrieves tournament information
 func (r *Repository) GetTournamentInfo(ctx context.Context, tournamentID uuid.UUID) (*TournamentInfo, error) {
 	var info TournamentInfo
 	var tiebreaksJSON []byte
+	var scoringJSON []byte
 
 	err := r.db.QueryRow(ctx, `
-		SELECT id, name, current_round, rounds, tiebreaks
+		SELECT id, name, current_round, rounds, tiebreaks, scoring_settings
 		FROM tournaments
 		WHERE id = $1
 	`, tournamentID).Scan(
@@ -74,6 +85,7 @@ func (r *Repository) GetTournamentInfo(ctx context.Context, tournamentID uuid.UU
 		&info.CurrentRound,
 		&info.TotalRounds,
 		&tiebreaksJSON,
+		&scoringJSON,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -87,6 +99,9 @@ func (r *Repository) GetTournamentInfo(ctx context.Context, tournamentID uuid.UU
 		// Simple JSON array parsing
 		info.Tiebreaks = parseTiebreaks(tiebreaksJSON)
 	}
+
+	// Parse scoring settings JSON
+	info.Scoring = parseScoringSettings(scoringJSON)
 
 	return &info, nil
 }
@@ -400,6 +415,37 @@ func parseTiebreaks(data []byte) []string {
 		result = append(result, current)
 	}
 	return result
+}
+
+func parseScoringSettings(data []byte) *ScoringConfig {
+	if len(data) == 0 || string(data) == "null" {
+		// Return default FIDE 1-0.5-0 scoring
+		return &ScoringConfig{
+			WinPoints:           1.0,
+			DrawPoints:          0.5,
+			LossPoints:          0.0,
+			SonnebornBergerMode: "proportional",
+		}
+	}
+
+	// Parse JSON manually (simple approach)
+	var scoring ScoringConfig
+	if err := json.Unmarshal(data, &scoring); err != nil {
+		// Return defaults on parse error
+		return &ScoringConfig{
+			WinPoints:           1.0,
+			DrawPoints:          0.5,
+			LossPoints:          0.0,
+			SonnebornBergerMode: "proportional",
+		}
+	}
+
+	// Ensure SB mode has a default
+	if scoring.SonnebornBergerMode == "" {
+		scoring.SonnebornBergerMode = "proportional"
+	}
+
+	return &scoring
 }
 
 func convertResultForWhite(result *string) *string {

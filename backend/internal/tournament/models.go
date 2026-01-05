@@ -392,6 +392,198 @@ func (s *ByeSettings) ValidateFIDECompliance(totalRounds int) []FIDEViolation {
 	return violations
 }
 
+// ScoringPreset represents predefined scoring configurations
+type ScoringPreset string
+
+const (
+	ScoringPresetStandard ScoringPreset = "standard" // 1-0.5-0 (FIDE default)
+	ScoringPresetFootball ScoringPreset = "football" // 3-1-0 (encourages decisive games)
+	ScoringPresetCustom   ScoringPreset = "custom"   // User-defined values
+)
+
+// SonnebornBergerMode defines how Sonneborn-Berger tiebreaker is calculated
+type SonnebornBergerMode string
+
+const (
+	// SBModeProportional calculates SB as: sum of (normalized_score * opponent_points)
+	// With 3-1-0 scoring, a draw contributes 1/3 of opponent's score (mathematically consistent)
+	SBModeProportional SonnebornBergerMode = "proportional"
+
+	// SBModeTraditional calculates SB as: full opponent points for win, half for draw
+	// Draw always contributes 1/2 of opponent's score regardless of point system
+	SBModeTraditional SonnebornBergerMode = "traditional"
+)
+
+// ScoringSettings contains configurable point values for game results
+// Bye and forfeit points are configured separately in ByeSettings
+type ScoringSettings struct {
+	Preset              ScoringPreset       `json:"preset"`              // Preset name for UI
+	WinPoints           float64             `json:"winPoints"`           // Points for a win (default: 1.0)
+	DrawPoints          float64             `json:"drawPoints"`          // Points for a draw (default: 0.5)
+	LossPoints          float64             `json:"lossPoints"`          // Points for a loss (default: 0.0)
+	SonnebornBergerMode SonnebornBergerMode `json:"sonnebornBergerMode"` // SB calculation mode
+}
+
+// DefaultScoringSettings returns FIDE-compliant standard scoring (1-0.5-0)
+func DefaultScoringSettings() *ScoringSettings {
+	return &ScoringSettings{
+		Preset:              ScoringPresetStandard,
+		WinPoints:           1.0,
+		DrawPoints:          0.5,
+		LossPoints:          0.0,
+		SonnebornBergerMode: SBModeProportional,
+	}
+}
+
+// FootballScoringSettings returns 3-1-0 scoring (Bilbao system)
+func FootballScoringSettings() *ScoringSettings {
+	return &ScoringSettings{
+		Preset:              ScoringPresetFootball,
+		WinPoints:           3.0,
+		DrawPoints:          1.0,
+		LossPoints:          0.0,
+		SonnebornBergerMode: SBModeProportional,
+	}
+}
+
+// GetScoringPreset returns settings for a named preset
+func GetScoringPreset(preset ScoringPreset) *ScoringSettings {
+	switch preset {
+	case ScoringPresetFootball:
+		return FootballScoringSettings()
+	default:
+		return DefaultScoringSettings()
+	}
+}
+
+// ScoringValidationError represents a validation error for scoring settings
+type ScoringValidationError struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
+}
+
+// Validate checks if the scoring settings are valid
+func (s *ScoringSettings) Validate() []ScoringValidationError {
+	var errors []ScoringValidationError
+
+	// Win points must be positive
+	if s.WinPoints <= 0 {
+		errors = append(errors, ScoringValidationError{
+			Field:   "winPoints",
+			Message: "win points must be greater than 0",
+		})
+	}
+
+	// Draw points must be non-negative
+	if s.DrawPoints < 0 {
+		errors = append(errors, ScoringValidationError{
+			Field:   "drawPoints",
+			Message: "draw points cannot be negative",
+		})
+	}
+
+	// Loss points must be non-negative
+	if s.LossPoints < 0 {
+		errors = append(errors, ScoringValidationError{
+			Field:   "lossPoints",
+			Message: "loss points cannot be negative",
+		})
+	}
+
+	// Win > Draw > Loss ordering
+	if s.WinPoints <= s.DrawPoints {
+		errors = append(errors, ScoringValidationError{
+			Field:   "winPoints",
+			Message: "win points must be greater than draw points",
+		})
+	}
+
+	if s.DrawPoints <= s.LossPoints {
+		errors = append(errors, ScoringValidationError{
+			Field:   "drawPoints",
+			Message: "draw points must be greater than loss points",
+		})
+	}
+
+	// Validate Sonneborn-Berger mode
+	if s.SonnebornBergerMode != SBModeProportional && s.SonnebornBergerMode != SBModeTraditional {
+		errors = append(errors, ScoringValidationError{
+			Field:   "sonnebornBergerMode",
+			Message: "invalid Sonneborn-Berger mode, must be 'proportional' or 'traditional'",
+		})
+	}
+
+	// Validate preset matches values
+	if s.Preset == ScoringPresetStandard {
+		if s.WinPoints != 1.0 || s.DrawPoints != 0.5 || s.LossPoints != 0.0 {
+			errors = append(errors, ScoringValidationError{
+				Field:   "preset",
+				Message: "standard preset must use 1-0.5-0 scoring",
+			})
+		}
+	} else if s.Preset == ScoringPresetFootball {
+		if s.WinPoints != 3.0 || s.DrawPoints != 1.0 || s.LossPoints != 0.0 {
+			errors = append(errors, ScoringValidationError{
+				Field:   "preset",
+				Message: "football preset must use 3-1-0 scoring",
+			})
+		}
+	}
+
+	return errors
+}
+
+// IsValid returns true if the scoring settings pass validation
+func (s *ScoringSettings) IsValid() bool {
+	return len(s.Validate()) == 0
+}
+
+// ValidateFIDECompliance checks settings against FIDE rules and returns violations
+func (s *ScoringSettings) ValidateFIDECompliance() []FIDEViolation {
+	var violations []FIDEViolation
+
+	// FIDE uses standard 1-0.5-0 scoring
+	if s.WinPoints != 1.0 {
+		violations = append(violations, FIDEViolation{
+			Setting:    "winPoints",
+			Value:      s.WinPoints,
+			FIDEValue:  1.0,
+			Severity:   "warning",
+			Message:    "FIDE uses 1 point for a win",
+			Regulation: "FIDE Laws of Chess 11.1",
+		})
+	}
+
+	if s.DrawPoints != 0.5 {
+		violations = append(violations, FIDEViolation{
+			Setting:    "drawPoints",
+			Value:      s.DrawPoints,
+			FIDEValue:  0.5,
+			Severity:   "warning",
+			Message:    "FIDE uses 0.5 points for a draw",
+			Regulation: "FIDE Laws of Chess 11.1",
+		})
+	}
+
+	if s.LossPoints != 0.0 {
+		violations = append(violations, FIDEViolation{
+			Setting:    "lossPoints",
+			Value:      s.LossPoints,
+			FIDEValue:  0.0,
+			Severity:   "warning",
+			Message:    "FIDE uses 0 points for a loss",
+			Regulation: "FIDE Laws of Chess 11.1",
+		})
+	}
+
+	return violations
+}
+
+// IsStandardScoring returns true if using FIDE standard 1-0.5-0 scoring
+func (s *ScoringSettings) IsStandardScoring() bool {
+	return s.WinPoints == 1.0 && s.DrawPoints == 0.5 && s.LossPoints == 0.0
+}
+
 // Tournament represents a chess tournament
 type Tournament struct {
 	ID             uuid.UUID        `json:"id" db:"id"`
@@ -450,6 +642,9 @@ type Tournament struct {
 
 	// Bye Settings (JSON) - configurable bye, forfeit, withdrawal rules
 	ByeSettings *ByeSettings `json:"byeSettings,omitempty" db:"bye_settings"`
+
+	// Scoring Settings (JSON) - configurable point values and SB mode
+	ScoringSettings *ScoringSettings `json:"scoringSettings,omitempty" db:"scoring_settings"`
 
 	// Settings (JSON)
 	Settings map[string]interface{} `json:"settings,omitempty" db:"settings"`
@@ -702,23 +897,24 @@ type CloneTournamentRequest struct {
 
 // UpdateTournamentRequest is the request body for updating a tournament
 type UpdateTournamentRequest struct {
-	Name               *string          `json:"name,omitempty" binding:"omitempty,min=1,max=255"`
-	Description        *string          `json:"description,omitempty"`
-	TimeControl        *string          `json:"timeControl,omitempty"`
-	Rounds             *int             `json:"rounds,omitempty" binding:"omitempty,min=1,max=15"`
-	StartDate          *string          `json:"startDate,omitempty"`
-	EndDate            *string          `json:"endDate,omitempty"`
-	MaxPlayers         *int             `json:"maxPlayers,omitempty"`
-	RegistrationOpens  *time.Time       `json:"registrationOpens,omitempty"`
-	RegistrationCloses *time.Time       `json:"registrationCloses,omitempty"`
-	FideRated          *bool            `json:"fideRated,omitempty"`
-	DwzRated           *bool            `json:"dwzRated,omitempty"`
-	AcceleratedPairing *bool            `json:"acceleratedPairing,omitempty"`
-	Tiebreaks          []string         `json:"tiebreaks,omitempty"`
-	VenueName          *string          `json:"venueName,omitempty"`
-	VenueAddress       *string          `json:"venueAddress,omitempty"`
-	VenueCity          *string          `json:"venueCity,omitempty"`
+	Name               *string           `json:"name,omitempty" binding:"omitempty,min=1,max=255"`
+	Description        *string           `json:"description,omitempty"`
+	TimeControl        *string           `json:"timeControl,omitempty"`
+	Rounds             *int              `json:"rounds,omitempty" binding:"omitempty,min=1,max=15"`
+	StartDate          *string           `json:"startDate,omitempty"`
+	EndDate            *string           `json:"endDate,omitempty"`
+	MaxPlayers         *int              `json:"maxPlayers,omitempty"`
+	RegistrationOpens  *time.Time        `json:"registrationOpens,omitempty"`
+	RegistrationCloses *time.Time        `json:"registrationCloses,omitempty"`
+	FideRated          *bool             `json:"fideRated,omitempty"`
+	DwzRated           *bool             `json:"dwzRated,omitempty"`
+	AcceleratedPairing *bool             `json:"acceleratedPairing,omitempty"`
+	Tiebreaks          []string          `json:"tiebreaks,omitempty"`
+	VenueName          *string           `json:"venueName,omitempty"`
+	VenueAddress       *string           `json:"venueAddress,omitempty"`
+	VenueCity          *string           `json:"venueCity,omitempty"`
 	Status             *TournamentStatus `json:"status,omitempty"`
+	ScoringSettings    *ScoringSettings  `json:"scoringSettings,omitempty"`
 }
 
 // RegisterParticipantRequest is the request for registering a participant

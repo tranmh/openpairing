@@ -47,7 +47,14 @@ func (s *Service) GetStandings(ctx context.Context, tournamentID uuid.UUID) (*St
 		tiebreakCodes[i] = tiebreak.TiebreakCode(tb)
 	}
 
-	calculator := tiebreak.NewCalculator(tiebreakCodes, info.TotalRounds)
+	// Create calculator with scoring settings
+	scoringConfig := &tiebreak.ScoringConfig{
+		WinPoints:           info.Scoring.WinPoints,
+		DrawPoints:          info.Scoring.DrawPoints,
+		LossPoints:          info.Scoring.LossPoints,
+		SonnebornBergerMode: info.Scoring.SonnebornBergerMode,
+	}
+	calculator := tiebreak.NewCalculatorWithScoring(tiebreakCodes, info.TotalRounds, scoringConfig)
 
 	// Build player data for calculator
 	participantPoints := make(map[uuid.UUID]float64)
@@ -92,7 +99,8 @@ func (s *Service) GetStandings(ctx context.Context, tournamentID uuid.UUID) (*St
 						RoundNumber: g.RoundNumber,
 					}
 					playerData.GamesAsBlack++
-					if *g.BlackScore == 1.0 {
+					// Check for win using scoring settings
+					if *g.BlackScore == info.Scoring.WinPoints {
 						playerData.WinsAsBlack++
 					}
 				}
