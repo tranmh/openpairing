@@ -86,7 +86,7 @@ export default function TournamentsPage() {
         params.append('status', statusFilter);
       }
       params.append('limit', '20');
-      const response = await api.get(`/tournaments?${params.toString()}`);
+      const response = await api.get<{ tournaments: Tournament[] }>(`/tournaments?${params.toString()}`);
       return response.data;
     },
   });

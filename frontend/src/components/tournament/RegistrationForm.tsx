@@ -78,7 +78,7 @@ export function RegistrationForm({
     queryKey: ['players', 'search', debouncedSearch],
     queryFn: async () => {
       if (!debouncedSearch || debouncedSearch.length < 2) return { players: [] };
-      const response = await api.get(`/players?q=${encodeURIComponent(debouncedSearch)}&limit=10`);
+      const response = await api.get<{ players: Player[] }>(`/players?q=${encodeURIComponent(debouncedSearch)}&limit=10`);
       return response.data;
     },
     enabled: debouncedSearch.length >= 2,

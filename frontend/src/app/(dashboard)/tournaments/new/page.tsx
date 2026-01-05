@@ -96,10 +96,12 @@ export default function NewTournamentPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: FormValues) => api.post('/tournaments', data),
+    mutationFn: (data: FormValues) => api.post<{ tournament: { id: string } }>('/tournaments', data),
     onSuccess: (response) => {
       toast.success('Turnier erstellt');
-      router.push(`/tournaments/${response.data.tournament.id}`);
+      if (response.data) {
+        router.push(`/tournaments/${response.data.tournament.id}`);
+      }
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.error || 'Fehler beim Erstellen');

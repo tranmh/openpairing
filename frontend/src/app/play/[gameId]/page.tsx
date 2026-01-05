@@ -92,8 +92,8 @@ export default function GamePage() {
   }, [gameState?.status]);
 
   // Board orientation based on player color
-  const boardOrientation = useMemo(() => {
-    if (playerColor) return playerColor;
+  const boardOrientation = useMemo((): 'white' | 'black' => {
+    if (playerColor === 'white' || playerColor === 'black') return playerColor;
     return 'white'; // Spectators see from white's perspective
   }, [playerColor]);
 
@@ -272,7 +272,7 @@ export default function GamePage() {
         <GameResult
           result={gameState.result}
           termination={gameState.termination}
-          playerColor={playerColor}
+          playerColor={playerColor === 'white' || playerColor === 'black' ? playerColor : null}
           whitePlayerName="White"
           blackPlayerName="Black"
           onClose={() => setShowResult(false)}

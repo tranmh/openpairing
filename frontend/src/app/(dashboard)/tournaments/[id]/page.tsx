@@ -528,7 +528,7 @@ function PairingsTab({
   const { data: pairingsData, isLoading } = useQuery({
     queryKey: ['pairings', tournamentId, selectedRound],
     queryFn: async () => {
-      const response = await api.get(
+      const response = await api.get<{ games: any[] }>(
         `/tournaments/${tournamentId}/rounds/${selectedRound}/pairings`
       );
       return response.data;
@@ -627,7 +627,7 @@ function StandingsTab({ tournamentId }: { tournamentId: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ['standings', tournamentId],
     queryFn: async () => {
-      const response = await api.get(`/tournaments/${tournamentId}/standings`);
+      const response = await api.get<{ standings: any[] }>(`/tournaments/${tournamentId}/standings`);
       return response.data;
     },
   });

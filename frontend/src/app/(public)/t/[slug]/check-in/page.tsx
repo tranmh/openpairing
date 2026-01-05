@@ -10,7 +10,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { api } from '@/lib/api';
 
 interface CheckInResponse {
   success: boolean;
@@ -34,26 +33,37 @@ export default function CheckInPage() {
   const [code, setCode] = useState(codeFromUrl || '');
   const [checkInResult, setCheckInResult] = useState<CheckInResponse | null>(null);
 
-  // Fetch tournament info
+  // Fetch tournament info - use direct fetch for public endpoint
   const { data: tournamentData, isLoading } = useQuery({
     queryKey: ['public-tournament', slug],
     queryFn: async () => {
-      const response = await api.get<{
+      const response = await fetch(`/api/public/tournaments/${slug}`);
+      if (!response.ok) {
+        throw new Error('Tournament not found');
+      }
+      return response.json() as Promise<{
         tournament: TournamentInfo;
         isCheckInOpen: boolean;
-      }>(`/public/tournaments/${slug}`);
-      return response.data;
+      }>;
     },
   });
 
-  // Check-in mutation
+  // Check-in mutation - use direct fetch for public endpoint
   const checkInMutation = useMutation({
     mutationFn: async (checkInCode: string) => {
-      const response = await api.post<CheckInResponse>(`/public/tournaments/${slug}/check-in`, {
-        code: checkInCode,
-        method: 'self_service',
+      const response = await fetch(`/api/public/tournaments/${slug}/check-in`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: checkInCode,
+          method: 'self_service',
+        }),
       });
-      return response.data;
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Check-in failed');
+      }
+      return response.json() as Promise<CheckInResponse>;
     },
     onSuccess: (result) => {
       if (result) {

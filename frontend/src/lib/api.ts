@@ -269,8 +269,13 @@ export const authApi = {
 
 // Players API
 export const playersApi = {
-  search: (query: string, params?: { federation?: string; minRating?: number; maxRating?: number }) =>
-    api.get<{ players: Player[]; total: number }>('/players', { q: query, ...params } as Record<string, string>),
+  search: (query: string, params?: { federation?: string; minRating?: number; maxRating?: number }) => {
+    const queryParams: Record<string, string> = { q: query };
+    if (params?.federation) queryParams.federation = params.federation;
+    if (params?.minRating !== undefined) queryParams.minRating = String(params.minRating);
+    if (params?.maxRating !== undefined) queryParams.maxRating = String(params.maxRating);
+    return api.get<{ players: Player[]; total: number }>('/players', queryParams);
+  },
 
   get: (id: string) => api.get<Player>(`/players/${id}`),
 
