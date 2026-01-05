@@ -65,6 +65,9 @@ type Repository interface {
 
 	// Player lookup
 	GetPlayerRating(ctx context.Context, playerID uuid.UUID, ratingType string) (int, error)
+
+	// Teams (for team tournaments)
+	GetTeams(ctx context.Context, tournamentID uuid.UUID) ([]Team, error)
 }
 
 type ListFilters struct {
@@ -1106,6 +1109,90 @@ func (r *PostgresRepository) GetPlayerRating(ctx context.Context, playerID uuid.
 		return 0, nil
 	}
 	return *rating, nil
+}
+
+// Team operations
+
+// GetTeams fetches all teams for a team tournament with their players
+func (r *PostgresRepository) GetTeams(ctx context.Context, tournamentID uuid.UUID) ([]Team, error) {
+	// First get all teams
+	teamQuery := `
+		SELECT id, tournament_id, name, points, created_at
+		FROM tournament_teams
+		WHERE tournament_id = $1
+		ORDER BY points DESC, id`
+
+	rows, err := r.db.Query(ctx, teamQuery, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get teams: %w", err)
+	}
+	defer rows.Close()
+
+	teamsMap := make(map[int]*Team)
+	var teamIDs []int
+
+	for rows.Next() {
+		var t Team
+		err := rows.Scan(&t.ID, &t.TournamentID, &t.Name, &t.Points, &t.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan team: %w", err)
+		}
+		teamsMap[t.ID] = &t
+		teamIDs = append(teamIDs, t.ID)
+	}
+
+	if len(teamIDs) == 0 {
+		return []Team{}, nil
+	}
+
+	// Get all players for these teams
+	playerQuery := `
+		SELECT
+			tp.id, tp.team_id, tp.player_id, tp.board_number, tp.is_active,
+			p.first_name, p.last_name, COALESCE(p.fide_standard, 0) as rating
+		FROM tournament_team_players tp
+		JOIN players p ON tp.player_id = p.id
+		WHERE tp.team_id = ANY($1)
+		ORDER BY tp.team_id, tp.board_number`
+
+	playerRows, err := r.db.Query(ctx, playerQuery, teamIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get team players: %w", err)
+	}
+	defer playerRows.Close()
+
+	for playerRows.Next() {
+		var tp TeamPlayer
+		var firstName, lastName *string
+		err := playerRows.Scan(
+			&tp.ID, &tp.TeamID, &tp.PlayerID, &tp.BoardNumber, &tp.IsActive,
+			&firstName, &lastName, &tp.Rating,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan team player: %w", err)
+		}
+
+		// Build player name
+		if lastName != nil && firstName != nil {
+			tp.Name = *lastName + ", " + *firstName
+		} else if lastName != nil {
+			tp.Name = *lastName
+		} else if firstName != nil {
+			tp.Name = *firstName
+		}
+
+		if team, ok := teamsMap[tp.TeamID]; ok {
+			team.Players = append(team.Players, tp)
+		}
+	}
+
+	// Convert map to slice
+	teams := make([]Team, 0, len(teamsMap))
+	for _, t := range teamsMap {
+		teams = append(teams, *t)
+	}
+
+	return teams, nil
 }
 
 // Helper functions

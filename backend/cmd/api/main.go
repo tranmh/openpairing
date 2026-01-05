@@ -130,36 +130,25 @@ func main() {
 
 	// Tournament service
 	tournamentRepo := tournament.NewRepository(db.Pool)
-	// Initialize pairing engine - try BBPPairings first, then JaVaFo
-	var pairingEngine engine.PairingEngine
-	if cfg.Pairing.BBPPath != "" {
-		bbp, err := engine.NewBBPPairings(&engine.BBPConfig{
-			ExecPath: cfg.Pairing.BBPPath,
-			Timeout:  cfg.Pairing.Timeout,
-		}, log.Logger)
-		if err != nil {
-			log.Warn().Err(err).Msg("bbpPairings not available")
-		} else {
-			pairingEngine = bbp
-			log.Info().Msg("Using bbpPairings engine")
-		}
+
+	// Initialize pairing engine registry with all available engines
+	engineRegistry := engine.NewRegistry(&engine.RegistryConfig{
+		JaVaFoPath: cfg.Pairing.JaVaFoPath,
+		BBPPath:    cfg.Pairing.BBPPath,
+	}, log.Logger)
+
+	// Log available engines
+	availableEngines := engineRegistry.ListAvailableEngines()
+	log.Info().
+		Strs("engines", availableEngines).
+		Bool("has_swiss", engineRegistry.HasSwissEngine()).
+		Msg("Pairing engine registry initialized")
+
+	if !engineRegistry.HasSwissEngine() {
+		log.Warn().Msg("No Swiss pairing engine (JaVaFo/BBP) available - Swiss tournaments will use Monrad fallback")
 	}
-	if pairingEngine == nil && cfg.Pairing.JaVaFoPath != "" {
-		javafo, err := engine.NewJaVaFo(&engine.JaVaFoConfig{
-			JarPath: cfg.Pairing.JaVaFoPath,
-			Timeout: cfg.Pairing.Timeout,
-		}, log.Logger)
-		if err != nil {
-			log.Warn().Err(err).Msg("JaVaFo not available")
-		} else {
-			pairingEngine = javafo
-			log.Info().Msg("Using JaVaFo engine")
-		}
-	}
-	if pairingEngine == nil {
-		log.Warn().Msg("No pairing engine available - pairing generation will be disabled")
-	}
-	tournamentService := tournament.NewService(tournamentRepo, pairingEngine, log.Logger)
+
+	tournamentService := tournament.NewServiceWithRegistry(tournamentRepo, engineRegistry, log.Logger)
 	tournamentHandler := tournament.NewHandler(tournamentService, log.Logger)
 
 	// Arbiter service

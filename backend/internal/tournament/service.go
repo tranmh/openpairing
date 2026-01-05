@@ -14,9 +14,10 @@ import (
 
 // Service provides tournament business logic
 type Service struct {
-	repo          Repository
-	pairingEngine engine.PairingEngine
-	logger        zerolog.Logger
+	repo           Repository
+	pairingEngine  engine.PairingEngine // Legacy: single engine for backwards compatibility
+	engineRegistry *engine.Registry     // New: registry of all engines
+	logger         zerolog.Logger
 }
 
 // NewService creates a new tournament service
@@ -25,6 +26,22 @@ func NewService(repo Repository, pairingEngine engine.PairingEngine, logger zero
 		repo:          repo,
 		pairingEngine: pairingEngine,
 		logger:        logger.With().Str("service", "tournament").Logger(),
+	}
+}
+
+// NewServiceWithRegistry creates a new tournament service with engine registry
+func NewServiceWithRegistry(repo Repository, registry *engine.Registry, logger zerolog.Logger) *Service {
+	// Get default Swiss engine for backwards compatibility
+	var defaultEngine engine.PairingEngine
+	if registry != nil {
+		defaultEngine, _ = registry.GetSwissEngine()
+	}
+
+	return &Service{
+		repo:           repo,
+		pairingEngine:  defaultEngine,
+		engineRegistry: registry,
+		logger:         logger.With().Str("service", "tournament").Logger(),
 	}
 }
 
@@ -602,11 +619,6 @@ func (s *Service) GeneratePairings(ctx context.Context, tournamentID uuid.UUID, 
 		return nil, fmt.Errorf("round is not in pending status")
 	}
 
-	// Check if pairing engine is available
-	if s.pairingEngine == nil {
-		return nil, fmt.Errorf("pairing engine not configured - set JAVAFO_PATH environment variable")
-	}
-
 	// Auto-assign start ranks if not already assigned (required for round 1)
 	participants, err := s.GetParticipants(ctx, tournamentID, &ParticipantFilter{
 		ActiveOnly: true,
@@ -627,24 +639,33 @@ func (s *Service) GeneratePairings(ctx context.Context, tournamentID uuid.UUID, 
 		if err := s.AssignStartRanks(ctx, tournamentID); err != nil {
 			return nil, fmt.Errorf("failed to assign start ranks: %w", err)
 		}
+		// Re-fetch participants with updated ranks
+		participants, err = s.GetParticipants(ctx, tournamentID, &ParticipantFilter{
+			ActiveOnly: true,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Generate TRF for pairing engine
-	trfData, err := s.generateTRFForPairing(ctx, tournament, roundNumber)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate TRF: %w", err)
+	// Generate pairings based on tournament type
+	var result *engine.PairingResult
+	var pairingErr error
+
+	switch tournament.Type {
+	case TypeRoundRobin, TypeKnockout, TypeScheveningen, TypeArena:
+		// Use built-in engines via general pairing request
+		result, pairingErr = s.generateBuiltInPairings(ctx, tournament, participants, roundNumber)
+	case TypeTeamSwiss:
+		// Team Swiss needs special handling
+		result, pairingErr = s.generateTeamSwissPairings(ctx, tournament, roundNumber)
+	default:
+		// Swiss tournaments use TRF-based engines (JaVaFo, BBP, Monrad, Keizer)
+		result, pairingErr = s.generateSwissPairings(ctx, tournament, roundNumber)
 	}
 
-	// Call pairing engine
-	req := &engine.PairingRequest{
-		TRFData:       trfData,
-		RoundNumber:   roundNumber,
-		PairingSystem: string(tournament.PairingSystem),
-	}
-
-	result, err := s.pairingEngine.GeneratePairings(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("pairing engine failed: %w", err)
+	if pairingErr != nil {
+		return nil, fmt.Errorf("pairing generation failed: %w", pairingErr)
 	}
 
 	// Convert pairings to games (re-fetch participants to get updated ranks if assigned)
@@ -1471,4 +1492,208 @@ func (s *Service) RemoveForbiddenPair(ctx context.Context, id uuid.UUID) error {
 // GetForbiddenPairs gets all forbidden pairs for a tournament
 func (s *Service) GetForbiddenPairs(ctx context.Context, tournamentID uuid.UUID) ([]ForbiddenPair, error) {
 	return s.repo.ListForbiddenPairs(ctx, tournamentID)
+}
+
+// generateBuiltInPairings generates pairings using built-in engines (RoundRobin, Knockout, Scheveningen, Arena)
+func (s *Service) generateBuiltInPairings(ctx context.Context, tournament *Tournament, participants []Participant, roundNumber int) (*engine.PairingResult, error) {
+	if s.engineRegistry == nil {
+		return nil, fmt.Errorf("engine registry not configured")
+	}
+
+	// Map tournament type to engine type
+	var engineType engine.TournamentType
+	switch tournament.Type {
+	case TypeRoundRobin:
+		engineType = engine.TournamentTypeRoundRobin
+	case TypeKnockout:
+		engineType = engine.TournamentTypeKnockout
+	case TypeScheveningen:
+		engineType = engine.TournamentTypeScheveningen
+	case TypeArena:
+		engineType = engine.TournamentTypeArena
+	default:
+		return nil, fmt.Errorf("unsupported tournament type for built-in engine: %s", tournament.Type)
+	}
+
+	// Get the general pairing engine
+	eng, err := s.engineRegistry.GetGeneralEngineForTournament(engineType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get engine: %w", err)
+	}
+
+	// Convert participants to engine.Player format
+	players := make([]engine.Player, 0, len(participants))
+	for _, p := range participants {
+		if !p.IsActive {
+			continue
+		}
+
+		// Build player name
+		name := ""
+		if p.PlayerLastName != nil && p.PlayerFirstName != nil {
+			name = *p.PlayerLastName + ", " + *p.PlayerFirstName
+		} else if p.PlayerLastName != nil {
+			name = *p.PlayerLastName
+		} else if p.PlayerFirstName != nil {
+			name = *p.PlayerFirstName
+		}
+
+		player := engine.Player{
+			StartNo:  p.StartRank,
+			Name:     name,
+			Rating:   p.StartingRating,
+			Points:   p.Points,
+			IsActive: p.IsActive,
+		}
+
+		// Fetch previous opponents for rematch avoidance
+		games, _ := s.repo.GetPlayerGames(ctx, tournament.ID, p.ID)
+		for _, g := range games {
+			if g.Result == nil || *g.Result == "" {
+				continue
+			}
+			var opponentID uuid.UUID
+			if g.WhiteParticipantID != nil && *g.WhiteParticipantID == p.ID {
+				if g.BlackParticipantID != nil {
+					opponentID = *g.BlackParticipantID
+				}
+			} else if g.BlackParticipantID != nil && *g.BlackParticipantID == p.ID {
+				if g.WhiteParticipantID != nil {
+					opponentID = *g.WhiteParticipantID
+				}
+			}
+			// Find opponent's start rank
+			for _, op := range participants {
+				if op.ID == opponentID {
+					player.Opponents = append(player.Opponents, op.StartRank)
+					break
+				}
+			}
+		}
+
+		players = append(players, player)
+	}
+
+	// Build the request
+	req := &engine.GeneralPairingRequest{
+		TournamentType: engineType,
+		Players:        players,
+		RoundNumber:    roundNumber,
+		TotalRounds:    tournament.Rounds,
+		PairingSystem:  string(tournament.PairingSystem),
+	}
+
+	// Generate pairings
+	return eng.GenerateGeneralPairings(ctx, req)
+}
+
+// generateTeamSwissPairings generates pairings for team Swiss tournaments
+func (s *Service) generateTeamSwissPairings(ctx context.Context, tournament *Tournament, roundNumber int) (*engine.PairingResult, error) {
+	if s.engineRegistry == nil {
+		return nil, fmt.Errorf("engine registry not configured")
+	}
+
+	// Get the team Swiss engine
+	eng, err := s.engineRegistry.GetGeneralEngineForTournament(engine.TournamentTypeTeamSwiss)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get team Swiss engine: %w", err)
+	}
+
+	// Fetch teams from repository (this requires the team data to be stored)
+	teams, err := s.repo.GetTeams(ctx, tournament.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get teams: %w", err)
+	}
+
+	if len(teams) < 2 {
+		return nil, fmt.Errorf("need at least 2 teams for team Swiss")
+	}
+
+	// Convert to engine.Team format
+	engineTeams := make([]engine.Team, 0, len(teams))
+	for _, t := range teams {
+		team := engine.Team{
+			ID:     t.ID,
+			Name:   t.Name,
+			Points: t.Points,
+		}
+
+		// Get team players
+		for _, p := range t.Players {
+			player := engine.Player{
+				StartNo:     p.StartRank,
+				Name:        p.Name,
+				Rating:      p.Rating,
+				BoardNumber: p.BoardNumber,
+				IsActive:    p.IsActive,
+			}
+			team.Players = append(team.Players, player)
+		}
+
+		engineTeams = append(engineTeams, team)
+	}
+
+	// Build the request
+	req := &engine.GeneralPairingRequest{
+		TournamentType: engine.TournamentTypeTeamSwiss,
+		Teams:          engineTeams,
+		RoundNumber:    roundNumber,
+		TotalRounds:    tournament.Rounds,
+	}
+
+	return eng.GenerateGeneralPairings(ctx, req)
+}
+
+// generateSwissPairings generates pairings for Swiss tournaments using TRF-based engines
+func (s *Service) generateSwissPairings(ctx context.Context, tournament *Tournament, roundNumber int) (*engine.PairingResult, error) {
+	// Generate TRF for the pairing engine
+	trfData, err := s.generateTRFForPairing(ctx, tournament, roundNumber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate TRF: %w", err)
+	}
+
+	// Try engine registry first if available
+	if s.engineRegistry != nil {
+		// Get engine based on configuration or use default Swiss engine
+		var eng engine.PairingEngine
+		var engineErr error
+
+		switch tournament.PairingEngine {
+		case EngineMonrad:
+			eng, engineErr = s.engineRegistry.GetEngine("monrad")
+		case EngineKeizer:
+			eng, engineErr = s.engineRegistry.GetEngine("keizer")
+		case EngineBBP:
+			eng, engineErr = s.engineRegistry.GetEngine("bbp")
+		case EngineJaVaFo:
+			eng, engineErr = s.engineRegistry.GetEngine("javafo")
+		default:
+			// Use the best available Swiss engine
+			eng, engineErr = s.engineRegistry.GetSwissEngine()
+		}
+
+		if engineErr == nil && eng != nil {
+			// Create pairing request
+			pairingReq := &engine.PairingRequest{
+				TRFData:       trfData,
+				RoundNumber:   roundNumber,
+				PairingSystem: string(tournament.PairingSystem),
+			}
+
+			return eng.GeneratePairings(ctx, pairingReq)
+		}
+	}
+
+	// Fall back to legacy single engine
+	if s.pairingEngine == nil {
+		return nil, fmt.Errorf("no pairing engine available")
+	}
+
+	pairingReq := &engine.PairingRequest{
+		TRFData:       trfData,
+		RoundNumber:   roundNumber,
+		PairingSystem: string(tournament.PairingSystem),
+	}
+
+	return s.pairingEngine.GeneratePairings(ctx, pairingReq)
 }

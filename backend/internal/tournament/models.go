@@ -11,10 +11,12 @@ import (
 type TournamentType string
 
 const (
-	TypeSwiss      TournamentType = "swiss"
-	TypeRoundRobin TournamentType = "round_robin"
-	TypeKnockout   TournamentType = "knockout"
-	TypeTeamSwiss  TournamentType = "team_swiss"
+	TypeSwiss        TournamentType = "swiss"
+	TypeRoundRobin   TournamentType = "round_robin"
+	TypeKnockout     TournamentType = "knockout"
+	TypeTeamSwiss    TournamentType = "team_swiss"
+	TypeScheveningen TournamentType = "scheveningen"
+	TypeArena        TournamentType = "arena"
 )
 
 // TournamentMode represents how games are played
@@ -51,17 +53,27 @@ const (
 type PairingEngine string
 
 const (
-	EngineJaVaFo PairingEngine = "javafo"
-	EngineBBP    PairingEngine = "bbp"
+	EngineJaVaFo     PairingEngine = "javafo"
+	EngineBBP        PairingEngine = "bbp"
+	EngineRoundRobin PairingEngine = "round_robin"
+	EngineKnockout   PairingEngine = "knockout"
+	EngineTeamSwiss  PairingEngine = "team_swiss"
+	EngineMonrad     PairingEngine = "monrad"
+	EngineKeizer     PairingEngine = "keizer"
+	EngineArena      PairingEngine = "arena"
 )
 
 // PairingSystem represents the pairing system
 type PairingSystem string
 
 const (
-	PairingDutch    PairingSystem = "dutch"
-	PairingBurstein PairingSystem = "burstein"
-	PairingDubov    PairingSystem = "dubov"
+	PairingDutch       PairingSystem = "dutch"
+	PairingBurstein    PairingSystem = "burstein"
+	PairingDubov       PairingSystem = "dubov"
+	PairingMonrad      PairingSystem = "monrad"
+	PairingKeizer      PairingSystem = "keizer"
+	PairingBerger      PairingSystem = "berger"       // Round robin
+	PairingScheveningen PairingSystem = "scheveningen"
 )
 
 // Tournament represents a chess tournament
@@ -279,6 +291,28 @@ type ForbiddenPair struct {
 	CreatedAt    time.Time `json:"createdAt" db:"created_at"`
 }
 
+// Team represents a team in a team tournament
+type Team struct {
+	ID           int       `json:"id" db:"id"`
+	TournamentID uuid.UUID `json:"tournamentId" db:"tournament_id"`
+	Name         string    `json:"name" db:"name"`
+	Points       float64   `json:"points" db:"points"`
+	Players      []TeamPlayer `json:"players"`
+	CreatedAt    time.Time `json:"createdAt" db:"created_at"`
+}
+
+// TeamPlayer represents a player on a team
+type TeamPlayer struct {
+	ID          uuid.UUID `json:"id" db:"id"`
+	TeamID      int       `json:"teamId" db:"team_id"`
+	PlayerID    uuid.UUID `json:"playerId" db:"player_id"`
+	StartRank   int       `json:"startRank" db:"start_rank"`
+	Name        string    `json:"name" db:"name"`
+	Rating      int       `json:"rating" db:"rating"`
+	BoardNumber int       `json:"boardNumber" db:"board_number"`
+	IsActive    bool      `json:"isActive" db:"is_active"`
+}
+
 // Request/Response types
 
 // CreateTournamentRequest is the request body for creating a tournament
@@ -287,11 +321,11 @@ type CreateTournamentRequest struct {
 	Name               string          `json:"name" binding:"required,min=1,max=255"`
 	Description        *string         `json:"description,omitempty"`
 	Slug               string          `json:"slug,omitempty"`
-	Type               TournamentType  `json:"type" binding:"required,oneof=swiss round_robin knockout team_swiss"`
+	Type               TournamentType  `json:"type" binding:"required,oneof=swiss round_robin knockout team_swiss scheveningen arena"`
 	Mode               TournamentMode  `json:"mode" binding:"required,oneof=otb online hybrid"`
 	TimeControl        string          `json:"timeControl" binding:"required"`
 	TimeControlType    TimeControlType `json:"timeControlType" binding:"required,oneof=standard rapid blitz"`
-	PairingEngine      PairingEngine   `json:"pairingEngine" binding:"omitempty,oneof=javafo bbp"`
+	PairingEngine      PairingEngine   `json:"pairingEngine" binding:"omitempty,oneof=javafo bbp round_robin knockout team_swiss monrad keizer arena"`
 	PairingSystem      PairingSystem   `json:"pairingSystem,omitempty"`
 	AcceleratedPairing bool            `json:"acceleratedPairing"`
 	Rounds             int             `json:"rounds" binding:"required,min=1,max=15"`
