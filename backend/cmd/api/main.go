@@ -29,6 +29,7 @@ import (
 	"github.com/openpairing/openpairing/internal/organization"
 	"github.com/openpairing/openpairing/internal/pairing/engine"
 	"github.com/openpairing/openpairing/internal/player"
+	"github.com/openpairing/openpairing/internal/registration"
 	"github.com/openpairing/openpairing/internal/reports"
 	"github.com/openpairing/openpairing/internal/result"
 	"github.com/openpairing/openpairing/internal/standings"
@@ -235,6 +236,11 @@ func main() {
 	waitlistService := waitlist.NewService(waitlistRepo, emailService, cfg.App.BaseURL, log.Logger)
 	waitlistHandler := waitlist.NewHandler(waitlistService, log.Logger)
 
+	// Registration service (self-service pre-registration and check-in)
+	registrationRepo := registration.NewRepository(db.Pool)
+	registrationService := registration.NewService(registrationRepo, cfg.App.BaseURL, log.Logger)
+	registrationHandler := registration.NewHandler(registrationService, log.Logger)
+
 	// WAM (Württembergische Amateurmeisterschaft) service
 	wamRepo := wam.NewRepository(db.Pool)
 	wamService := wam.NewService(wamRepo, log.Logger)
@@ -247,7 +253,7 @@ func main() {
 	}
 
 	// Create Gin router
-	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler, exportHandler, standingsHandler, resultHandler, organizationHandler, teamHandler, userHandler, gameActionHandler, fairplayHandler, teamTournamentHandler, waitlistHandler, wamHandler)
+	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler, exportHandler, standingsHandler, resultHandler, organizationHandler, teamHandler, userHandler, gameActionHandler, fairplayHandler, teamTournamentHandler, waitlistHandler, registrationHandler, wamHandler)
 
 	// Create server
 	srv := &http.Server{
@@ -301,7 +307,7 @@ func main() {
 	log.Info().Msg("Server exited")
 }
 
-func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler, reportsHandler *reports.Handler, exportHandler *export.Handler, standingsHandler *standings.Handler, resultHandler *result.Handler, organizationHandler *organization.Handler, teamHandler *team.Handler, userHandler *user.Handler, gameActionHandler *gameaction.Handler, fairplayHandler *fairplay.Handler, teamTournamentHandler *team_tournament.Handler, waitlistHandler *waitlist.Handler, wamHandler *wam.Handler) *gin.Engine {
+func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler, reportsHandler *reports.Handler, exportHandler *export.Handler, standingsHandler *standings.Handler, resultHandler *result.Handler, organizationHandler *organization.Handler, teamHandler *team.Handler, userHandler *user.Handler, gameActionHandler *gameaction.Handler, fairplayHandler *fairplay.Handler, teamTournamentHandler *team_tournament.Handler, waitlistHandler *waitlist.Handler, registrationHandler *registration.Handler, wamHandler *wam.Handler) *gin.Engine {
 	// Set Gin mode
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -382,6 +388,9 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 
 		// WAM (Württembergische Amateurmeisterschaft) routes
 		wamHandler.RegisterRoutes(v1, authMiddleware.Authenticate())
+
+		// Registration routes (self-service pre-registration and check-in)
+		registrationHandler.RegisterRoutes(router, authMiddleware.Authenticate(), authMiddleware.OptionalAuth(), authMiddleware.RequireOrganizer())
 
 		// Online games
 		games := v1.Group("/games")

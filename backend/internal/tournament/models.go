@@ -584,6 +584,153 @@ func (s *ScoringSettings) IsStandardScoring() bool {
 	return s.WinPoints == 1.0 && s.DrawPoints == 0.5 && s.LossPoints == 0.0
 }
 
+// RegistrationAccessMode defines how players can access tournament registration
+type RegistrationAccessMode string
+
+const (
+	AccessModePublic     RegistrationAccessMode = "public"      // Anyone with slug can access
+	AccessModeInviteOnly RegistrationAccessMode = "invite_only" // Requires invite token
+)
+
+// CheckInMethod defines how players can check in
+type CheckInMethod string
+
+const (
+	CheckInMethodSelfService CheckInMethod = "self_service" // Player clicks check-in link
+	CheckInMethodQRCode      CheckInMethod = "qr_code"      // Player scans QR at venue
+	CheckInMethodOrganizer   CheckInMethod = "organizer"    // Organizer confirms manually
+)
+
+// RegistrationSettings configures self-service pre-registration and check-in
+type RegistrationSettings struct {
+	PreRegistration PreRegistrationSettings `json:"preRegistration"`
+	CheckIn         CheckInSettings         `json:"checkIn"`
+	Access          AccessSettings          `json:"access"`
+}
+
+// PreRegistrationSettings configures player self-registration behavior
+type PreRegistrationSettings struct {
+	Enabled          bool `json:"enabled"`          // Allow players to pre-register via link
+	RequiresApproval bool `json:"requiresApproval"` // Organizer must approve each registration
+	AllowGuests      bool `json:"allowGuests"`      // Allow users without accounts to register
+	NotifyOrganizer  bool `json:"notifyOrganizer"`  // Email organizer on new registration
+}
+
+// CheckInSettings configures player check-in at the venue
+type CheckInSettings struct {
+	Enabled            bool     `json:"enabled"`            // Enable check-in functionality
+	Methods            []string `json:"methods"`            // Allowed check-in methods: self_service, qr_code, organizer
+	WindowOpenMinutes  int      `json:"windowOpenMinutes"`  // Minutes before tournament start to open check-in
+	WindowCloseMinutes int      `json:"windowCloseMinutes"` // Minutes after tournament start to close check-in
+	AutoNoShow         bool     `json:"autoNoShow"`         // Automatically mark non-checked-in as no-show
+}
+
+// AccessSettings configures how players can access the tournament
+type AccessSettings struct {
+	Mode string `json:"mode"` // "public" or "invite_only"
+}
+
+// DefaultRegistrationSettings returns sensible defaults for self-registration
+func DefaultRegistrationSettings() *RegistrationSettings {
+	return &RegistrationSettings{
+		PreRegistration: PreRegistrationSettings{
+			Enabled:          true,
+			RequiresApproval: false,
+			AllowGuests:      true,
+			NotifyOrganizer:  true,
+		},
+		CheckIn: CheckInSettings{
+			Enabled:            true,
+			Methods:            []string{"self_service", "organizer"},
+			WindowOpenMinutes:  120, // 2 hours before
+			WindowCloseMinutes: 15,  // 15 minutes after start
+			AutoNoShow:         false,
+		},
+		Access: AccessSettings{
+			Mode: "public",
+		},
+	}
+}
+
+// RegistrationValidationError represents a validation error for registration settings
+type RegistrationValidationError struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
+}
+
+// Validate checks if the registration settings are valid
+func (s *RegistrationSettings) Validate() []RegistrationValidationError {
+	var errors []RegistrationValidationError
+
+	// Validate check-in window
+	if s.CheckIn.WindowOpenMinutes < 0 {
+		errors = append(errors, RegistrationValidationError{
+			Field:   "checkIn.windowOpenMinutes",
+			Message: "window open minutes cannot be negative",
+		})
+	}
+
+	if s.CheckIn.WindowCloseMinutes < -60 {
+		errors = append(errors, RegistrationValidationError{
+			Field:   "checkIn.windowCloseMinutes",
+			Message: "window close cannot be more than 60 minutes before start",
+		})
+	}
+
+	// Validate check-in methods if check-in is enabled
+	if s.CheckIn.Enabled && len(s.CheckIn.Methods) == 0 {
+		errors = append(errors, RegistrationValidationError{
+			Field:   "checkIn.methods",
+			Message: "at least one check-in method must be enabled",
+		})
+	}
+
+	// Validate method values
+	validMethods := map[string]bool{
+		"self_service": true,
+		"qr_code":      true,
+		"organizer":    true,
+	}
+	for _, method := range s.CheckIn.Methods {
+		if !validMethods[method] {
+			errors = append(errors, RegistrationValidationError{
+				Field:   "checkIn.methods",
+				Message: "invalid check-in method: " + method,
+			})
+		}
+	}
+
+	// Validate access mode
+	if s.Access.Mode != "public" && s.Access.Mode != "invite_only" {
+		errors = append(errors, RegistrationValidationError{
+			Field:   "access.mode",
+			Message: "access mode must be 'public' or 'invite_only'",
+		})
+	}
+
+	return errors
+}
+
+// IsValid returns true if the registration settings pass validation
+func (s *RegistrationSettings) IsValid() bool {
+	return len(s.Validate()) == 0
+}
+
+// IsPreRegistrationOpen checks if pre-registration is currently available
+func (s *RegistrationSettings) IsPreRegistrationOpen() bool {
+	return s.PreRegistration.Enabled
+}
+
+// HasCheckInMethod returns true if the specified check-in method is allowed
+func (s *RegistrationSettings) HasCheckInMethod(method string) bool {
+	for _, m := range s.CheckIn.Methods {
+		if m == method {
+			return true
+		}
+	}
+	return false
+}
+
 // Tournament represents a chess tournament
 type Tournament struct {
 	ID             uuid.UUID        `json:"id" db:"id"`
@@ -645,6 +792,9 @@ type Tournament struct {
 
 	// Scoring Settings (JSON) - configurable point values and SB mode
 	ScoringSettings *ScoringSettings `json:"scoringSettings,omitempty" db:"scoring_settings"`
+
+	// Registration Settings (JSON) - self-registration and check-in configuration
+	RegistrationSettings *RegistrationSettings `json:"registrationSettings,omitempty" db:"registration_settings"`
 
 	// Settings (JSON)
 	Settings map[string]interface{} `json:"settings,omitempty" db:"settings"`
@@ -712,6 +862,16 @@ type Participant struct {
 	// Payment
 	PaymentStatus    string  `json:"paymentStatus" db:"payment_status"`
 	PaymentReference *string `json:"paymentReference,omitempty" db:"payment_reference"`
+
+	// Self-registration and Check-in
+	PreRegisteredAt    *time.Time `json:"preRegisteredAt,omitempty" db:"pre_registered_at"`
+	ApprovedAt         *time.Time `json:"approvedAt,omitempty" db:"approved_at"`
+	ApprovedBy         *uuid.UUID `json:"approvedBy,omitempty" db:"approved_by"`
+	CheckedInAt        *time.Time `json:"checkedInAt,omitempty" db:"checked_in_at"`
+	CheckedInBy        *uuid.UUID `json:"checkedInBy,omitempty" db:"checked_in_by"`
+	CheckInMethod      *string    `json:"checkInMethod,omitempty" db:"check_in_method"`
+	CheckInCode        *string    `json:"checkInCode,omitempty" db:"check_in_code"`
+	RegistrationSource string     `json:"registrationSource" db:"registration_source"` // organizer, self_service, guest_converted
 
 	// Player info (joined)
 	PlayerFirstName *string `json:"playerFirstName,omitempty" db:"player_first_name"`
