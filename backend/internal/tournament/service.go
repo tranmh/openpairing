@@ -1125,11 +1125,21 @@ func (s *Service) GetCrosstable(ctx context.Context, tournamentID uuid.UUID) (*C
 	}
 
 	for i, p := range participants {
+		// Build player name from joined participant data
+		var name string
+		if p.PlayerLastName != nil && p.PlayerFirstName != nil {
+			name = *p.PlayerLastName + ", " + *p.PlayerFirstName
+		} else if p.PlayerLastName != nil {
+			name = *p.PlayerLastName
+		} else if p.PlayerFirstName != nil {
+			name = *p.PlayerFirstName
+		}
+
 		player := CrosstablePlayer{
 			Rank:           i + 1,
 			ParticipantID:  p.ID,
 			PlayerID:       p.PlayerID,
-			Name:           "", // Would need to join with players table
+			Name:           name,
 			Rating:         p.StartingRating,
 			Points:         p.Points,
 			Buchholz:       p.Buchholz,
