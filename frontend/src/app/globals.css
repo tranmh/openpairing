@@ -286,4 +286,76 @@
     max-width: 100% !important;
     padding: 0 !important;
   }
+
+  /* Seating chart print styles */
+  .seating-chart-print {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .seating-chart-print svg {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Seating poster print layout */
+  .seating-poster {
+    page-break-before: always;
+    page-break-after: always;
+  }
+
+  .seating-poster h1 {
+    font-size: 18pt !important;
+  }
+
+  .seating-poster h2 {
+    font-size: 14pt !important;
+  }
+
+  .seating-poster h3 {
+    font-size: 12pt !important;
+  }
+
+  /* Seating rows in poster */
+  .seating-poster .grid {
+    display: grid !important;
+  }
+
+  .seating-poster [class*="rounded"] {
+    border-radius: 4px !important;
+  }
+
+  /* Preserve background colors for seating */
+  .seating-poster [class*="bg-yellow"] {
+    background-color: #fef9c3 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .seating-poster [class*="bg-gray"] {
+    background-color: #f3f4f6 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Color indicators in pairings */
+  .seating-poster .bg-white {
+    background-color: white !important;
+    border: 1px solid #999 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .seating-poster .bg-gray-800 {
+    background-color: #1f2937 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Yellow star for fixed player */
+  .seating-poster .text-yellow-500 {
+    color: #eab308 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
 }

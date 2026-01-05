@@ -2430,3 +2430,430 @@ type ParticipantByeStatus struct {
 	MaxHalfPointByesLeft int       `json:"maxHalfPointByesLeft"`
 	CanRequestBye        bool      `json:"canRequestBye"`
 }
+
+// ========== Seating Chart / Rutsch-System ==========
+
+// SeatingPosition describes one seat in the round robin arrangement
+type SeatingPosition struct {
+	SeatNumber  int    `json:"seatNumber"`  // 1-indexed position in circle
+	StartNumber int    `json:"startNumber"` // Player's start rank
+	PlayerName  string `json:"playerName,omitempty"`
+	Rating      int    `json:"rating,omitempty"`
+	IsFixed     bool   `json:"isFixed"` // True for the fixed player (usually #1)
+	IsBye       bool   `json:"isBye"`   // True for dummy/bye seat
+}
+
+// SeatingPairing shows which seats play each other
+type SeatingPairing struct {
+	Board        int    `json:"board"`
+	WhiteSeat    int    `json:"whiteSeat"`
+	BlackSeat    int    `json:"blackSeat"`
+	WhiteStartNo int    `json:"whiteStartNo"`
+	BlackStartNo int    `json:"blackStartNo"`
+	WhiteName    string `json:"whiteName,omitempty"`
+	BlackName    string `json:"blackName,omitempty"`
+	IsBye        bool   `json:"isBye"`
+}
+
+// SeatingChartResponse contains all data for seating visualization
+type SeatingChartResponse struct {
+	TournamentID   uuid.UUID         `json:"tournamentId"`
+	TournamentName string            `json:"tournamentName"`
+	NumPlayers     int               `json:"numPlayers"`
+	NumSeats       int               `json:"numSeats"` // May differ if odd (includes dummy seat)
+	FixedSeat      int               `json:"fixedSeat"`
+	ByeSeat        int               `json:"byeSeat"` // 0 if even players
+	Seats          []SeatingPosition `json:"seats"`
+	Pairings       []SeatingPairing  `json:"pairings"`
+	RoundNumber    int               `json:"roundNumber"`
+}
+
+// SeatMovement describes one player's movement between rounds
+type SeatMovement struct {
+	StartNumber int    `json:"startNumber"`
+	PlayerName  string `json:"playerName,omitempty"`
+	FromSeat    int    `json:"fromSeat"`
+	ToSeat      int    `json:"toSeat"`
+	IsFixed     bool   `json:"isFixed"`
+}
+
+// RotationDataResponse shows transition between rounds
+type RotationDataResponse struct {
+	FromRound   int               `json:"fromRound"`
+	ToRound     int               `json:"toRound"`
+	BeforeSeats []SeatingPosition `json:"beforeSeats"`
+	AfterSeats  []SeatingPosition `json:"afterSeats"`
+	Movements   []SeatMovement    `json:"movements"`
+}
+
+// GetSeatingChart calculates the seating arrangement for a given round
+func (s *Service) GetSeatingChart(ctx context.Context, tournamentID uuid.UUID, roundNumber int) (*SeatingChartResponse, error) {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Must be a round robin tournament
+	if tournament.Type != TypeRoundRobin {
+		return nil, fmt.Errorf("seating chart is only available for round robin tournaments")
+	}
+
+	participants, err := s.repo.ListParticipants(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	numPlayers := len(participants)
+	if numPlayers < 2 {
+		return nil, fmt.Errorf("need at least 2 participants for seating chart")
+	}
+
+	// Get round robin settings or use defaults
+	settings := tournament.RoundRobinSettings
+	if settings == nil {
+		settings = DefaultRoundRobinSettings()
+	}
+
+	// Default round to current round if not specified
+	if roundNumber <= 0 {
+		roundNumber = tournament.CurrentRound
+		if roundNumber <= 0 {
+			roundNumber = 1
+		}
+	}
+
+	// Validate round number doesn't exceed tournament rounds
+	if roundNumber > tournament.Rounds && tournament.Rounds > 0 {
+		return nil, fmt.Errorf("round %d exceeds tournament rounds (%d)", roundNumber, tournament.Rounds)
+	}
+
+	// Calculate number of seats (add dummy for odd players)
+	numSeats := numPlayers
+	if numPlayers%2 == 1 {
+		numSeats = numPlayers + 1
+	}
+
+	// Calculate seat positions for this round
+	seatToStartNo := calculateSeatingForRound(numSeats, roundNumber, settings.FixedPlayer)
+
+	// Build participant lookup by start number
+	participantByStartNo := make(map[int]*Participant)
+	for i := range participants {
+		participantByStartNo[participants[i].StartRank] = &participants[i]
+	}
+
+	// Determine bye seat position - find where the bye (dummy player) actually sits this round
+	byeSeat := 0
+	if numPlayers%2 == 1 {
+		// Find the seat where the dummy player (startNo = numSeats = numPlayers + 1) sits
+		dummyStartNo := numSeats // The bye is represented as player numSeats
+		for seat, startNo := range seatToStartNo {
+			if startNo == dummyStartNo {
+				byeSeat = seat
+				break
+			}
+		}
+	}
+
+	// Build seats list
+	seats := make([]SeatingPosition, numSeats)
+	for seat := 1; seat <= numSeats; seat++ {
+		startNo := seatToStartNo[seat]
+		isBye := startNo > numPlayers
+
+		pos := SeatingPosition{
+			SeatNumber:  seat,
+			StartNumber: startNo,
+			IsFixed:     startNo == settings.FixedPlayer,
+			IsBye:       isBye,
+		}
+
+		if !isBye {
+			if p, ok := participantByStartNo[startNo]; ok {
+				if p.PlayerFirstName != nil && p.PlayerLastName != nil {
+					pos.PlayerName = *p.PlayerLastName + ", " + *p.PlayerFirstName
+				}
+				pos.Rating = p.EffectiveRating()
+			}
+		}
+
+		seats[seat-1] = pos
+	}
+
+	// Build pairings list (seats paired from opposite ends)
+	numPairs := numSeats / 2
+	pairings := make([]SeatingPairing, 0, numPairs)
+
+	for i := 0; i < numPairs; i++ {
+		whiteSeat := i + 1
+		blackSeat := numSeats - i
+
+		whiteStartNo := seatToStartNo[whiteSeat]
+		blackStartNo := seatToStartNo[blackSeat]
+
+		// Alternate colors for fixed player each round
+		if whiteSeat == 1 && roundNumber%2 == 0 {
+			whiteSeat, blackSeat = blackSeat, whiteSeat
+			whiteStartNo, blackStartNo = blackStartNo, whiteStartNo
+		}
+
+		isBye := whiteStartNo > numPlayers || blackStartNo > numPlayers
+
+		pairing := SeatingPairing{
+			Board:        i + 1,
+			WhiteSeat:    whiteSeat,
+			BlackSeat:    blackSeat,
+			WhiteStartNo: whiteStartNo,
+			BlackStartNo: blackStartNo,
+			IsBye:        isBye,
+		}
+
+		// Add player names
+		if !isBye {
+			if p, ok := participantByStartNo[whiteStartNo]; ok && p.PlayerFirstName != nil && p.PlayerLastName != nil {
+				pairing.WhiteName = *p.PlayerLastName + ", " + *p.PlayerFirstName
+			}
+			if p, ok := participantByStartNo[blackStartNo]; ok && p.PlayerFirstName != nil && p.PlayerLastName != nil {
+				pairing.BlackName = *p.PlayerLastName + ", " + *p.PlayerFirstName
+			}
+		}
+
+		pairings = append(pairings, pairing)
+	}
+
+	// Find the seat where the fixed player sits
+	fixedSeat := 1
+	for seat, startNo := range seatToStartNo {
+		if startNo == settings.FixedPlayer {
+			fixedSeat = seat
+			break
+		}
+	}
+
+	return &SeatingChartResponse{
+		TournamentID:   tournament.ID,
+		TournamentName: tournament.Name,
+		NumPlayers:     numPlayers,
+		NumSeats:       numSeats,
+		FixedSeat:      fixedSeat,
+		ByeSeat:        byeSeat,
+		Seats:          seats,
+		Pairings:       pairings,
+		RoundNumber:    roundNumber,
+	}, nil
+}
+
+// GetRotationData calculates the movement between two consecutive rounds
+func (s *Service) GetRotationData(ctx context.Context, tournamentID uuid.UUID, fromRound, toRound int) (*RotationDataResponse, error) {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	if tournament.Type != TypeRoundRobin {
+		return nil, fmt.Errorf("rotation data is only available for round robin tournaments")
+	}
+
+	// Validate round numbers
+	if fromRound <= 0 {
+		return nil, fmt.Errorf("fromRound must be positive, got %d", fromRound)
+	}
+	if toRound <= 0 {
+		return nil, fmt.Errorf("toRound must be positive, got %d", toRound)
+	}
+	if fromRound > toRound {
+		return nil, fmt.Errorf("fromRound (%d) cannot be greater than toRound (%d)", fromRound, toRound)
+	}
+	if tournament.Rounds > 0 && toRound > tournament.Rounds {
+		return nil, fmt.Errorf("toRound (%d) exceeds tournament rounds (%d)", toRound, tournament.Rounds)
+	}
+
+	participants, err := s.repo.ListParticipants(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	numPlayers := len(participants)
+	if numPlayers < 2 {
+		return nil, fmt.Errorf("need at least 2 participants")
+	}
+
+	settings := tournament.RoundRobinSettings
+	if settings == nil {
+		settings = DefaultRoundRobinSettings()
+	}
+
+	numSeats := numPlayers
+	if numPlayers%2 == 1 {
+		numSeats = numPlayers + 1
+	}
+
+	// Calculate seat positions for both rounds
+	beforeSeatToStartNo := calculateSeatingForRound(numSeats, fromRound, settings.FixedPlayer)
+	afterSeatToStartNo := calculateSeatingForRound(numSeats, toRound, settings.FixedPlayer)
+
+	// Build participant lookup
+	participantByStartNo := make(map[int]*Participant)
+	for i := range participants {
+		participantByStartNo[participants[i].StartRank] = &participants[i]
+	}
+
+	// Build before seats
+	beforeSeats := make([]SeatingPosition, numSeats)
+	for seat := 1; seat <= numSeats; seat++ {
+		startNo := beforeSeatToStartNo[seat]
+		isBye := startNo > numPlayers
+
+		pos := SeatingPosition{
+			SeatNumber:  seat,
+			StartNumber: startNo,
+			IsFixed:     startNo == settings.FixedPlayer,
+			IsBye:       isBye,
+		}
+
+		if !isBye {
+			if p, ok := participantByStartNo[startNo]; ok && p.PlayerFirstName != nil && p.PlayerLastName != nil {
+				pos.PlayerName = *p.PlayerLastName + ", " + *p.PlayerFirstName
+				pos.Rating = p.EffectiveRating()
+			}
+		}
+
+		beforeSeats[seat-1] = pos
+	}
+
+	// Build after seats
+	afterSeats := make([]SeatingPosition, numSeats)
+	for seat := 1; seat <= numSeats; seat++ {
+		startNo := afterSeatToStartNo[seat]
+		isBye := startNo > numPlayers
+
+		pos := SeatingPosition{
+			SeatNumber:  seat,
+			StartNumber: startNo,
+			IsFixed:     startNo == settings.FixedPlayer,
+			IsBye:       isBye,
+		}
+
+		if !isBye {
+			if p, ok := participantByStartNo[startNo]; ok && p.PlayerFirstName != nil && p.PlayerLastName != nil {
+				pos.PlayerName = *p.PlayerLastName + ", " + *p.PlayerFirstName
+				pos.Rating = p.EffectiveRating()
+			}
+		}
+
+		afterSeats[seat-1] = pos
+	}
+
+	// Calculate movements
+	// Build startNo -> seat mapping for before state
+	startNoToBeforeSeat := make(map[int]int)
+	for seat, startNo := range beforeSeatToStartNo {
+		startNoToBeforeSeat[startNo] = seat
+	}
+
+	movements := make([]SeatMovement, 0, numSeats)
+	for seat := 1; seat <= numSeats; seat++ {
+		startNo := afterSeatToStartNo[seat]
+		fromSeat := startNoToBeforeSeat[startNo]
+
+		movement := SeatMovement{
+			StartNumber: startNo,
+			FromSeat:    fromSeat,
+			ToSeat:      seat,
+			IsFixed:     startNo == settings.FixedPlayer,
+		}
+
+		if startNo <= numPlayers {
+			if p, ok := participantByStartNo[startNo]; ok && p.PlayerFirstName != nil && p.PlayerLastName != nil {
+				movement.PlayerName = *p.PlayerLastName + ", " + *p.PlayerFirstName
+			}
+		}
+
+		movements = append(movements, movement)
+	}
+
+	return &RotationDataResponse{
+		FromRound:   fromRound,
+		ToRound:     toRound,
+		BeforeSeats: beforeSeats,
+		AfterSeats:  afterSeats,
+		Movements:   movements,
+	}, nil
+}
+
+// UpdateRoundRobinSettings updates the round robin settings for a tournament
+func (s *Service) UpdateRoundRobinSettings(ctx context.Context, tournamentID uuid.UUID, settings *RoundRobinSettings) error {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return err
+	}
+
+	if tournament.Type != TypeRoundRobin {
+		return fmt.Errorf("round robin settings only applicable to round robin tournaments")
+	}
+
+	// Get participant count for validation
+	participants, err := s.repo.ListParticipants(ctx, tournamentID)
+	if err != nil {
+		return err
+	}
+	numPlayers := len(participants)
+
+	// Validate settings
+	if validationErrors := settings.Validate(numPlayers); len(validationErrors) > 0 {
+		// Return first validation error
+		return fmt.Errorf("invalid settings: %s - %s", validationErrors[0].Field, validationErrors[0].Message)
+	}
+
+	tournament.RoundRobinSettings = settings
+	return s.repo.Update(ctx, tournament)
+}
+
+// calculateSeatingForRound determines seat positions after N-1 rotations
+// Returns a map: seat number (1-indexed) -> start number
+// The fixedPlayer stays at seat 1, all others rotate clockwise
+func calculateSeatingForRound(numSeats int, roundNumber int, fixedPlayer int) map[int]int {
+	if fixedPlayer < 1 || fixedPlayer > numSeats {
+		fixedPlayer = 1 // Default to player 1 if invalid
+	}
+
+	// Initialize players array (1-indexed start numbers)
+	// Position 0 will be the fixed position (seat 1)
+	players := make([]int, numSeats)
+
+	// Place fixedPlayer at position 0 (seat 1)
+	players[0] = fixedPlayer
+
+	// Place other players in remaining positions
+	idx := 1
+	for p := 1; p <= numSeats; p++ {
+		if p != fixedPlayer {
+			players[idx] = p
+			idx++
+		}
+	}
+
+	// Perform (roundNumber - 1) rotations
+	// Rotation: keep position 0 fixed, rotate all others clockwise
+	// Move last player to position 1, shift others right
+	for r := 1; r < roundNumber; r++ {
+		if numSeats > 1 {
+			last := players[numSeats-1]
+			for i := numSeats - 1; i > 1; i-- {
+				players[i] = players[i-1]
+			}
+			if numSeats > 1 {
+				players[1] = last
+			}
+		}
+	}
+
+	// Build seat -> startNo mapping
+	// After rotation, players[i] is at seat i+1
+	seatToStartNo := make(map[int]int)
+	for i := 0; i < numSeats; i++ {
+		seatToStartNo[i+1] = players[i]
+	}
+
+	return seatToStartNo
+}

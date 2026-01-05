@@ -317,7 +317,31 @@ export const tournamentsApi = {
 
   enterResult: (tournamentId: string, gameId: string, result: string) =>
     api.put<Game>(`/tournaments/${tournamentId}/games/${gameId}/result`, { result }),
+
+  // Round Robin Seating Chart
+  getSeatingChart: (id: string, round?: number) =>
+    api.get<SeatingChartData>(
+      `/tournaments/${id}/seating-chart`,
+      round ? { round: String(round) } : undefined
+    ),
+
+  getRotationData: (id: string, fromRound: number, toRound: number) =>
+    api.get<RotationData>(`/tournaments/${id}/rotation/${fromRound}/${toRound}`),
+
+  getRoundRobinSettings: (id: string) =>
+    api.get<RoundRobinSettingsResponse>(`/tournaments/${id}/round-robin-settings`),
+
+  updateRoundRobinSettings: (id: string, settings: UpdateRoundRobinSettingsRequest) =>
+    api.put<RoundRobinSettingsResponse>(`/tournaments/${id}/round-robin-settings`, settings),
 };
+
+// Round Robin types
+import type {
+  SeatingChartData,
+  RotationData,
+  RoundRobinSettingsResponse,
+  UpdateRoundRobinSettingsRequest,
+} from '@/types/roundrobin';
 
 // WAM (Wiener Arbeiter-Mannschaftsmeisterschaft) API
 import type {

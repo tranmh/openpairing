@@ -15,6 +15,7 @@ import {
   ListIcon,
   GridIcon,
   UsersRoundIcon,
+  CircleDot,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,12 +30,14 @@ import { PublicStandingsTab } from '@/components/public/PublicStandingsTab';
 import { PublicPairingsTab } from '@/components/public/PublicPairingsTab';
 import { PublicCrosstableTab } from '@/components/public/PublicCrosstableTab';
 import { PublicParticipantsTab } from '@/components/public/PublicParticipantsTab';
+import { SeatingView } from '@/components/tournament/SeatingView';
 
 interface TournamentPublicInfo {
   id: string;
   name: string;
   description?: string;
   slug: string;
+  type: string;
   startDate: string;
   endDate?: string;
   venueName?: string;
@@ -237,7 +240,7 @@ export default function PublicTournamentPage() {
 
         {/* Tabs */}
         <Tabs defaultValue="info" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className={`grid w-full ${tournament.type === 'round_robin' ? 'grid-cols-6' : 'grid-cols-5'}`}>
             <TabsTrigger value="info" className="gap-2">
               <CalendarIcon className="h-4 w-4 hidden sm:inline" />
               Info
@@ -250,6 +253,12 @@ export default function PublicTournamentPage() {
               <ListIcon className="h-4 w-4 hidden sm:inline" />
               Paarungen
             </TabsTrigger>
+            {tournament.type === 'round_robin' && (
+              <TabsTrigger value="seating" className="gap-2" disabled={!hasStarted}>
+                <CircleDot className="h-4 w-4 hidden sm:inline" />
+                Sitzplan
+              </TabsTrigger>
+            )}
             <TabsTrigger value="crosstable" className="gap-2" disabled={!hasStarted}>
               <GridIcon className="h-4 w-4 hidden sm:inline" />
               Kreuztabelle
@@ -552,6 +561,33 @@ export default function PublicTournamentPage() {
               </Card>
             )}
           </TabsContent>
+
+          {/* Seating Tab (Round Robin only) */}
+          {tournament.type === 'round_robin' && (
+            <TabsContent value="seating">
+              {hasStarted && tournamentId ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Sitzplan (Rutsch-System)</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <SeatingView
+                      tournamentId={tournamentId}
+                      totalRounds={totalRounds}
+                      initialRound={currentRound}
+                      mode="public"
+                    />
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card>
+                  <CardContent className="py-8 text-center text-muted-foreground">
+                    Der Sitzplan wird angezeigt, sobald das Turnier gestartet ist.
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+          )}
 
           {/* Participants Tab */}
           <TabsContent value="participants">

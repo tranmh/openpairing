@@ -129,6 +129,7 @@ func (r *PostgresRepository) Create(ctx context.Context, t *Tournament) error {
 	settingsJSON, _ := json.Marshal(t.Settings)
 	byeSettingsJSON, _ := json.Marshal(t.ByeSettings)
 	scoringSettingsJSON, _ := json.Marshal(t.ScoringSettings)
+	roundRobinSettingsJSON, _ := json.Marshal(t.RoundRobinSettings)
 
 	query := `
 		INSERT INTO tournaments (
@@ -140,7 +141,8 @@ func (r *PostgresRepository) Create(ctx context.Context, t *Tournament) error {
 			venue_name, venue_address, venue_city, venue_country,
 			fide_rated, dwz_rated, oesb_rated,
 			entry_fee_cents, currency, status,
-			tiebreaks, settings, bye_settings, scoring_settings, current_round, participant_count,
+			tiebreaks, settings, bye_settings, scoring_settings, round_robin_settings,
+			current_round, participant_count,
 			created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5,
@@ -151,8 +153,9 @@ func (r *PostgresRepository) Create(ctx context.Context, t *Tournament) error {
 			$20, $21, $22, $23,
 			$24, $25, $26,
 			$27, $28, $29,
-			$30, $31, $32, $33, $34, $35,
-			$36, $37
+			$30, $31, $32, $33, $34,
+			$35, $36,
+			$37, $38
 		)`
 
 	_, err := r.db.Exec(ctx, query,
@@ -164,7 +167,8 @@ func (r *PostgresRepository) Create(ctx context.Context, t *Tournament) error {
 		t.VenueName, t.VenueAddress, t.VenueCity, t.VenueCountry,
 		t.FideRated, t.DwzRated, t.OesbRated,
 		t.EntryFeeCents, t.Currency, t.Status,
-		tiebreaksJSON, settingsJSON, byeSettingsJSON, scoringSettingsJSON, t.CurrentRound, t.ParticipantCount,
+		tiebreaksJSON, settingsJSON, byeSettingsJSON, scoringSettingsJSON, roundRobinSettingsJSON,
+		t.CurrentRound, t.ParticipantCount,
 		t.CreatedAt, t.UpdatedAt,
 	)
 
@@ -186,12 +190,13 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (*Tourna
 			venue_name, venue_address, venue_city, venue_country,
 			fide_rated, dwz_rated, oesb_rated,
 			entry_fee_cents, currency, status, ratings_locked_at,
-			tiebreaks, settings, bye_settings, scoring_settings, current_round, participant_count,
+			tiebreaks, settings, bye_settings, scoring_settings, round_robin_settings,
+			current_round, participant_count,
 			created_at, updated_at
 		FROM tournaments WHERE id = $1`
 
 	var t Tournament
-	var tiebreaksJSON, settingsJSON, byeSettingsJSON, scoringSettingsJSON []byte
+	var tiebreaksJSON, settingsJSON, byeSettingsJSON, scoringSettingsJSON, roundRobinSettingsJSON []byte
 
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&t.ID, &t.OrganizationID, &t.Name, &t.Description, &t.Slug,
@@ -202,7 +207,8 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (*Tourna
 		&t.VenueName, &t.VenueAddress, &t.VenueCity, &t.VenueCountry,
 		&t.FideRated, &t.DwzRated, &t.OesbRated,
 		&t.EntryFeeCents, &t.Currency, &t.Status, &t.RatingsLockedAt,
-		&tiebreaksJSON, &settingsJSON, &byeSettingsJSON, &scoringSettingsJSON, &t.CurrentRound, &t.ParticipantCount,
+		&tiebreaksJSON, &settingsJSON, &byeSettingsJSON, &scoringSettingsJSON, &roundRobinSettingsJSON,
+		&t.CurrentRound, &t.ParticipantCount,
 		&t.CreatedAt, &t.UpdatedAt,
 	)
 
@@ -220,6 +226,9 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (*Tourna
 	}
 	if scoringSettingsJSON != nil {
 		json.Unmarshal(scoringSettingsJSON, &t.ScoringSettings)
+	}
+	if roundRobinSettingsJSON != nil {
+		json.Unmarshal(roundRobinSettingsJSON, &t.RoundRobinSettings)
 	}
 
 	return &t, nil
@@ -245,6 +254,7 @@ func (r *PostgresRepository) Update(ctx context.Context, t *Tournament) error {
 	settingsJSON, _ := json.Marshal(t.Settings)
 	byeSettingsJSON, _ := json.Marshal(t.ByeSettings)
 	scoringSettingsJSON, _ := json.Marshal(t.ScoringSettings)
+	roundRobinSettingsJSON, _ := json.Marshal(t.RoundRobinSettings)
 
 	query := `
 		UPDATE tournaments SET
@@ -258,8 +268,9 @@ func (r *PostgresRepository) Update(ctx context.Context, t *Tournament) error {
 			fide_rated = $17, dwz_rated = $18, oesb_rated = $19,
 			entry_fee_cents = $20, status = $21, ratings_locked_at = $22,
 			tiebreaks = $23, settings = $24, bye_settings = $25, scoring_settings = $26,
-			current_round = $27, participant_count = $28,
-			updated_at = $29
+			round_robin_settings = $27,
+			current_round = $28, participant_count = $29,
+			updated_at = $30
 		WHERE id = $1`
 
 	result, err := r.db.Exec(ctx, query,
@@ -273,6 +284,7 @@ func (r *PostgresRepository) Update(ctx context.Context, t *Tournament) error {
 		t.FideRated, t.DwzRated, t.OesbRated,
 		t.EntryFeeCents, t.Status, t.RatingsLockedAt,
 		tiebreaksJSON, settingsJSON, byeSettingsJSON, scoringSettingsJSON,
+		roundRobinSettingsJSON,
 		t.CurrentRound, t.ParticipantCount,
 		t.UpdatedAt,
 	)

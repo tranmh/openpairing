@@ -39,10 +39,13 @@ import {
   Share2,
   Edit,
   CheckCircle,
+  CircleDot,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { WamGroupsTab, WamParticipantsTab } from '@/components/wam';
+import { SeatingView } from '@/components/tournament/SeatingView';
+import { RoundRobinSettingsForm } from '@/components/tournament/RoundRobinSettingsForm';
 
 interface Tournament {
   id: string;
@@ -364,6 +367,12 @@ export default function TournamentDetailPage() {
           )}
           <TabsTrigger value="pairings">Paarungen</TabsTrigger>
           <TabsTrigger value="standings">Tabelle</TabsTrigger>
+          {tournament.type === 'round_robin' && (
+            <TabsTrigger value="seating">
+              <CircleDot className="mr-1 h-4 w-4" />
+              Sitzplan
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="overview">
@@ -467,6 +476,43 @@ export default function TournamentDetailPage() {
         <TabsContent value="standings">
           <StandingsTab tournamentId={tournamentId} />
         </TabsContent>
+
+        {tournament.type === 'round_robin' && (
+          <TabsContent value="seating">
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Sitzplan-Einstellungen</CardTitle>
+                  <CardDescription>
+                    Konfiguration für das Rutsch-System
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <RoundRobinSettingsForm
+                    tournamentId={tournamentId}
+                    numPlayers={participants.filter(p => p.isActive).length}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Sitzplan</CardTitle>
+                  <CardDescription>
+                    Visualisierung der Sitzordnung pro Runde
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <SeatingView
+                    tournamentId={tournamentId}
+                    totalRounds={tournament.rounds}
+                    mode="arbiter"
+                  />
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

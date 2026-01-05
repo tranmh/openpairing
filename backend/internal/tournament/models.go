@@ -716,6 +716,93 @@ func (s *RegistrationSettings) IsValid() bool {
 	return len(s.Validate()) == 0
 }
 
+// RoundRobinSettings configures round robin specific options for Rutsch-System visualization
+type RoundRobinSettings struct {
+	// ByePosition: which seat gets the bye (1-indexed)
+	// 0 = automatic (opposite to fixed player, i.e., numPlayers/2 + 1 for even, or numPlayers+1 for odd)
+	ByePosition int `json:"byePosition"`
+
+	// FixedPlayer: which start number stays in fixed seat (default: 1)
+	FixedPlayer int `json:"fixedPlayer"`
+
+	// ShowSeatingChart: enable seating chart visualization
+	ShowSeatingChart bool `json:"showSeatingChart"`
+}
+
+// DefaultRoundRobinSettings returns sensible defaults
+func DefaultRoundRobinSettings() *RoundRobinSettings {
+	return &RoundRobinSettings{
+		ByePosition:      0, // 0 = automatic (opposite to fixed)
+		FixedPlayer:      1,
+		ShowSeatingChart: true,
+	}
+}
+
+// RoundRobinSettingsValidationError represents a validation error
+type RoundRobinSettingsValidationError struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
+}
+
+// Validate checks if the round robin settings are valid
+func (s *RoundRobinSettings) Validate(numPlayers int) []RoundRobinSettingsValidationError {
+	var errors []RoundRobinSettingsValidationError
+
+	// Fixed player must be a valid start number
+	if s.FixedPlayer < 1 {
+		errors = append(errors, RoundRobinSettingsValidationError{
+			Field:   "fixedPlayer",
+			Message: "fixed player must be at least 1",
+		})
+	}
+	if numPlayers > 0 && s.FixedPlayer > numPlayers {
+		errors = append(errors, RoundRobinSettingsValidationError{
+			Field:   "fixedPlayer",
+			Message: "fixed player must not exceed number of players",
+		})
+	}
+
+	// Bye position must be valid if specified
+	if s.ByePosition < 0 {
+		errors = append(errors, RoundRobinSettingsValidationError{
+			Field:   "byePosition",
+			Message: "bye position cannot be negative",
+		})
+	}
+	// If numPlayers is even, bye position makes no sense unless it's 0 (disabled)
+	if numPlayers > 0 && numPlayers%2 == 0 && s.ByePosition > 0 {
+		errors = append(errors, RoundRobinSettingsValidationError{
+			Field:   "byePosition",
+			Message: "bye position is only applicable for odd number of players",
+		})
+	}
+
+	return errors
+}
+
+// IsValid returns true if the settings pass validation
+func (s *RoundRobinSettings) IsValid(numPlayers int) bool {
+	return len(s.Validate(numPlayers)) == 0
+}
+
+// GetEffectiveByePosition returns the actual bye seat position
+// For odd players, returns the bye seat (default: opposite to fixed player)
+// For even players, returns 0 (no bye)
+func (s *RoundRobinSettings) GetEffectiveByePosition(numPlayers int) int {
+	if numPlayers%2 == 0 {
+		return 0 // No bye needed for even players
+	}
+
+	if s.ByePosition > 0 {
+		return s.ByePosition
+	}
+
+	// Default: opposite to fixed player
+	// In a circle of n+1 seats (for odd n players), opposite is at (n+1)/2 + 1
+	numSeats := numPlayers + 1
+	return (numSeats / 2) + 1
+}
+
 // IsPreRegistrationOpen checks if pre-registration is currently available
 func (s *RegistrationSettings) IsPreRegistrationOpen() bool {
 	return s.PreRegistration.Enabled
@@ -795,6 +882,9 @@ type Tournament struct {
 
 	// Registration Settings (JSON) - self-registration and check-in configuration
 	RegistrationSettings *RegistrationSettings `json:"registrationSettings,omitempty" db:"registration_settings"`
+
+	// Round Robin Settings (JSON) - seating and rotation configuration for Rutsch-System
+	RoundRobinSettings *RoundRobinSettings `json:"roundRobinSettings,omitempty" db:"round_robin_settings"`
 
 	// Settings (JSON)
 	Settings map[string]interface{} `json:"settings,omitempty" db:"settings"`

@@ -55,6 +55,10 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 		tournaments.GET("/:id/rounds/:round/pairings", h.GetPairings)
 		tournaments.GET("/:id/export/trf", h.ExportTRF)
 
+		// Round Robin Seating Chart (public - visible to all)
+		tournaments.GET("/:id/seating-chart", h.GetSeatingChart)
+		tournaments.GET("/:id/rotation/:from/:to", h.GetRotationData)
+
 		// Protected routes (authenticated users)
 		protected := tournaments.Group("")
 		protected.Use(authMiddleware)
@@ -122,6 +126,10 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 			organizer.POST("/:id/special-rankings", h.CreateSpecialRanking)
 			organizer.PUT("/:id/special-rankings/:rankingId", h.UpdateSpecialRanking)
 			organizer.DELETE("/:id/special-rankings/:rankingId", h.DeleteSpecialRanking)
+
+			// Round Robin Settings (organizer only)
+			organizer.GET("/:id/round-robin-settings", h.GetRoundRobinSettings)
+			organizer.PUT("/:id/round-robin-settings", h.UpdateRoundRobinSettings)
 		}
 	}
 }
@@ -1646,4 +1654,174 @@ type ParticipantFilter struct {
 	SectionID  *uuid.UUID
 	Limit      int
 	Offset     int
+}
+
+// ========== Round Robin Seating Chart Handlers ==========
+
+// GetSeatingChart returns seating arrangement for a round
+// @Summary Get seating chart for round robin tournament
+// @Tags tournaments
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param round query int false "Round number (defaults to current round)"
+// @Success 200 {object} SeatingChartResponse
+// @Router /tournaments/{id}/seating-chart [get]
+func (h *Handler) GetSeatingChart(c *gin.Context) {
+	tournamentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament id"})
+		return
+	}
+
+	roundNumber := 0
+	if roundStr := c.Query("round"); roundStr != "" {
+		roundNumber, err = strconv.Atoi(roundStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid round number"})
+			return
+		}
+	}
+
+	chart, err := h.service.GetSeatingChart(c.Request.Context(), tournamentID, roundNumber)
+	if err != nil {
+		h.logger.Error().Err(err).Str("tournamentId", tournamentID.String()).Msg("Failed to get seating chart")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, chart)
+}
+
+// GetRotationData returns movement data between two rounds
+// @Summary Get rotation data between rounds
+// @Tags tournaments
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param from path int true "From round number"
+// @Param to path int true "To round number"
+// @Success 200 {object} RotationDataResponse
+// @Router /tournaments/{id}/rotation/{from}/{to} [get]
+func (h *Handler) GetRotationData(c *gin.Context) {
+	tournamentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament id"})
+		return
+	}
+
+	fromRound, err := strconv.Atoi(c.Param("from"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from round"})
+		return
+	}
+
+	toRound, err := strconv.Atoi(c.Param("to"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to round"})
+		return
+	}
+
+	data, err := h.service.GetRotationData(c.Request.Context(), tournamentID, fromRound, toRound)
+	if err != nil {
+		h.logger.Error().Err(err).Str("tournamentId", tournamentID.String()).Msg("Failed to get rotation data")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, data)
+}
+
+// GetRoundRobinSettings returns round robin settings for a tournament
+// @Summary Get round robin settings
+// @Tags tournaments
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Success 200 {object} RoundRobinSettingsResponse
+// @Router /tournaments/{id}/round-robin-settings [get]
+func (h *Handler) GetRoundRobinSettings(c *gin.Context) {
+	tournamentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament id"})
+		return
+	}
+
+	tournament, err := h.service.GetTournament(c.Request.Context(), tournamentID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("tournamentId", tournamentID.String()).Msg("Failed to get tournament")
+		c.JSON(http.StatusNotFound, gin.H{"error": "tournament not found"})
+		return
+	}
+
+	settings := tournament.RoundRobinSettings
+	if settings == nil {
+		settings = DefaultRoundRobinSettings()
+	}
+
+	c.JSON(http.StatusOK, RoundRobinSettingsResponse{Settings: settings})
+}
+
+// UpdateRoundRobinSettings updates round robin settings for a tournament
+// @Summary Update round robin settings
+// @Tags tournaments
+// @Accept json
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param request body UpdateRoundRobinSettingsRequest true "Settings"
+// @Success 200 {object} RoundRobinSettingsResponse
+// @Router /tournaments/{id}/round-robin-settings [put]
+func (h *Handler) UpdateRoundRobinSettings(c *gin.Context) {
+	tournamentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament id"})
+		return
+	}
+
+	var req UpdateRoundRobinSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get existing settings or create new
+	tournament, err := h.service.GetTournament(c.Request.Context(), tournamentID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("tournamentId", tournamentID.String()).Msg("Failed to get tournament")
+		c.JSON(http.StatusNotFound, gin.H{"error": "tournament not found"})
+		return
+	}
+
+	settings := tournament.RoundRobinSettings
+	if settings == nil {
+		settings = DefaultRoundRobinSettings()
+	}
+
+	// Apply updates
+	if req.ByePosition != nil {
+		settings.ByePosition = *req.ByePosition
+	}
+	if req.FixedPlayer != nil {
+		settings.FixedPlayer = *req.FixedPlayer
+	}
+	if req.ShowSeatingChart != nil {
+		settings.ShowSeatingChart = *req.ShowSeatingChart
+	}
+
+	if err := h.service.UpdateRoundRobinSettings(c.Request.Context(), tournamentID, settings); err != nil {
+		h.logger.Error().Err(err).Str("tournamentId", tournamentID.String()).Msg("Failed to update round robin settings")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, RoundRobinSettingsResponse{Settings: settings})
+}
+
+// RoundRobinSettingsResponse wraps round robin settings
+type RoundRobinSettingsResponse struct {
+	Settings *RoundRobinSettings `json:"settings"`
+}
+
+// UpdateRoundRobinSettingsRequest for updating round robin settings
+type UpdateRoundRobinSettingsRequest struct {
+	ByePosition      *int  `json:"byePosition,omitempty"`
+	FixedPlayer      *int  `json:"fixedPlayer,omitempty"`
+	ShowSeatingChart *bool `json:"showSeatingChart,omitempty"`
 }
