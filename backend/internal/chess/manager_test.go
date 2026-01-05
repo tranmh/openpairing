@@ -346,8 +346,10 @@ func TestGameManager_ClockLoop(t *testing.T) {
 	time.Sleep(700 * time.Millisecond)
 
 	retrieved := gm.GetGame(game.ID)
-	assert.Equal(t, StatusCompleted, retrieved.Status)
-	assert.Equal(t, TerminationTimeout, retrieved.Termination)
+	require.NotNil(t, retrieved)
+	state := retrieved.GetState() // Use thread-safe snapshot
+	assert.Equal(t, StatusCompleted, state.Status)
+	assert.Equal(t, TerminationTimeout, state.Termination)
 }
 
 func TestGameManager_CleanupAfterCompletion(t *testing.T) {

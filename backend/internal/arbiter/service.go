@@ -17,24 +17,18 @@ type ArbiterAssignment struct {
 	Role         string    `json:"role" db:"role"` // "chief", "assistant"
 }
 
-// ArbiterRepository provides access to arbiter assignments
-type ArbiterRepository interface {
-	GetArbiterAssignment(ctx context.Context, tournamentID, userID uuid.UUID) (*ArbiterAssignment, error)
-	IsOrganizationMember(ctx context.Context, organizationID, userID uuid.UUID) (bool, error)
-}
-
 // Service provides arbiter-specific business logic
 type Service struct {
 	tournamentRepo tournament.Repository
-	arbiterRepo    ArbiterRepository
+	repo           *Repository
 	logger         zerolog.Logger
 }
 
 // NewService creates a new arbiter service
-func NewService(tournamentRepo tournament.Repository, arbiterRepo ArbiterRepository, logger zerolog.Logger) *Service {
+func NewService(tournamentRepo tournament.Repository, repo *Repository, logger zerolog.Logger) *Service {
 	return &Service{
 		tournamentRepo: tournamentRepo,
-		arbiterRepo:    arbiterRepo,
+		repo:           repo,
 		logger:         logger.With().Str("service", "arbiter").Logger(),
 	}
 }
@@ -47,22 +41,22 @@ func (s *Service) canManageTournament(ctx context.Context, tournamentID, arbiter
 	}
 
 	// Check if arbiter has a specific assignment for this tournament
-	if s.arbiterRepo != nil {
-		assignment, err := s.arbiterRepo.GetArbiterAssignment(ctx, tournamentID, arbiterID)
+	if s.repo != nil {
+		assignment, err := s.repo.GetArbiterAssignment(ctx, tournamentID, arbiterID)
 		if err == nil && assignment != nil {
 			return nil // Arbiter is assigned to this tournament
 		}
 
 		// Check if arbiter is a member of the tournament's organization
 		if tourney.OrganizationID != nil {
-			isMember, err := s.arbiterRepo.IsOrganizationMember(ctx, *tourney.OrganizationID, arbiterID)
+			isMember, err := s.repo.IsOrganizationMember(ctx, *tourney.OrganizationID, arbiterID)
 			if err == nil && isMember {
 				return nil // Arbiter is a member of the organization
 			}
 		}
 	}
 
-	// If no arbiter repo or checks failed, deny access
+	// If no repo or checks failed, deny access
 	// In a production system, you might want to allow site admins here
 	return fmt.Errorf("arbiter not authorized for this tournament")
 }
@@ -733,13 +727,21 @@ func (s *Service) GetAuditLog(ctx context.Context, tournamentID uuid.UUID, arbit
 		return nil, err
 	}
 
-	// This would be implemented with a proper audit log repository
-	// For now, return empty slice
+	if s.repo != nil {
+		return s.repo.GetAuditLog(ctx, tournamentID, limit)
+	}
+
 	return []AuditAction{}, nil
 }
 
 func (s *Service) logAudit(ctx context.Context, action *AuditAction) {
-	// This would be implemented to persist audit actions to database
+	// Persist audit action to database
+	if s.repo != nil {
+		if err := s.repo.CreateAuditLog(ctx, action); err != nil {
+			s.logger.Error().Err(err).Msg("Failed to persist audit log")
+		}
+	}
+
 	s.logger.Debug().
 		Str("action", action.Action).
 		Str("entity_type", action.EntityType).
@@ -784,7 +786,13 @@ func (s *Service) CreateAnnouncement(ctx context.Context, req *CreateAnnouncemen
 		CreatedAt:    time.Now(),
 	}
 
-	// This would be persisted to database
+	// Persist to database
+	if s.repo != nil {
+		if err := s.repo.CreateAnnouncement(ctx, announcement); err != nil {
+			return nil, fmt.Errorf("failed to create announcement: %w", err)
+		}
+	}
+
 	s.logger.Info().
 		Str("tournament_id", req.TournamentID.String()).
 		Str("title", req.Title).
@@ -792,4 +800,102 @@ func (s *Service) CreateAnnouncement(ctx context.Context, req *CreateAnnouncemen
 		Msg("Announcement created")
 
 	return announcement, nil
+}
+
+// ListAnnouncements lists announcements for a tournament
+func (s *Service) ListAnnouncements(ctx context.Context, tournamentID uuid.UUID, activeOnly bool) ([]Announcement, error) {
+	if s.repo == nil {
+		return []Announcement{}, nil
+	}
+	return s.repo.ListAnnouncements(ctx, tournamentID, activeOnly)
+}
+
+// DeactivateAnnouncement deactivates an announcement
+func (s *Service) DeactivateAnnouncement(ctx context.Context, announcementID uuid.UUID, arbiterID uuid.UUID) error {
+	if s.repo == nil {
+		return fmt.Errorf("repository not configured")
+	}
+
+	announcement, err := s.repo.GetAnnouncement(ctx, announcementID)
+	if err != nil || announcement == nil {
+		return fmt.Errorf("announcement not found")
+	}
+
+	// Verify arbiter has permission for this tournament
+	if err := s.canManageTournament(ctx, announcement.TournamentID, arbiterID); err != nil {
+		return err
+	}
+
+	return s.repo.DeactivateAnnouncement(ctx, announcementID)
+}
+
+// AssignArbiter assigns an arbiter to a tournament
+func (s *Service) AssignArbiter(ctx context.Context, tournamentID, userID uuid.UUID, role string, assignedBy uuid.UUID) error {
+	if s.repo == nil {
+		return fmt.Errorf("repository not configured")
+	}
+
+	// Verify the assigner has permission
+	if err := s.canManageTournament(ctx, tournamentID, assignedBy); err != nil {
+		return err
+	}
+
+	assignment := &ArbiterAssignment{
+		TournamentID: tournamentID,
+		UserID:       userID,
+		Role:         role,
+	}
+
+	if err := s.repo.AssignArbiter(ctx, assignment, assignedBy); err != nil {
+		return fmt.Errorf("failed to assign arbiter: %w", err)
+	}
+
+	s.logAudit(ctx, &AuditAction{
+		ID:           uuid.New(),
+		TournamentID: tournamentID,
+		ArbiterID:    assignedBy,
+		Action:       "assign_arbiter",
+		EntityType:   "user",
+		EntityID:     userID,
+		NewValue:     role,
+		CreatedAt:    time.Now(),
+	})
+
+	return nil
+}
+
+// RemoveArbiter removes an arbiter from a tournament
+func (s *Service) RemoveArbiter(ctx context.Context, tournamentID, userID, removedBy uuid.UUID) error {
+	if s.repo == nil {
+		return fmt.Errorf("repository not configured")
+	}
+
+	// Verify the remover has permission
+	if err := s.canManageTournament(ctx, tournamentID, removedBy); err != nil {
+		return err
+	}
+
+	if err := s.repo.RemoveArbiter(ctx, tournamentID, userID); err != nil {
+		return fmt.Errorf("failed to remove arbiter: %w", err)
+	}
+
+	s.logAudit(ctx, &AuditAction{
+		ID:           uuid.New(),
+		TournamentID: tournamentID,
+		ArbiterID:    removedBy,
+		Action:       "remove_arbiter",
+		EntityType:   "user",
+		EntityID:     userID,
+		CreatedAt:    time.Now(),
+	})
+
+	return nil
+}
+
+// ListTournamentArbiters lists all arbiters for a tournament
+func (s *Service) ListTournamentArbiters(ctx context.Context, tournamentID uuid.UUID) ([]ArbiterAssignment, error) {
+	if s.repo == nil {
+		return []ArbiterAssignment{}, nil
+	}
+	return s.repo.ListTournamentArbiters(ctx, tournamentID)
 }

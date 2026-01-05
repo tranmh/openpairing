@@ -507,6 +507,13 @@ func (gs *GameState) GetPGN() string {
 	return gs.game.String()
 }
 
+// IsOngoing returns true if the game is currently ongoing (thread-safe)
+func (gs *GameState) IsOngoing() bool {
+	gs.mutex.RLock()
+	defer gs.mutex.RUnlock()
+	return gs.Status == StatusOngoing
+}
+
 // IsUserInGame checks if a user is a player in the game
 func (gs *GameState) IsUserInGame(userID uuid.UUID) bool {
 	return userID == gs.WhiteUserID || userID == gs.BlackUserID

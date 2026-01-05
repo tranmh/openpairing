@@ -601,3 +601,23 @@ func (h *Hub) GetClientCount() int {
 	defer h.mutex.RUnlock()
 	return len(h.clients)
 }
+
+// RegisterClient registers a client with the hub
+func (h *Hub) RegisterClient(client *Client) {
+	h.register <- client
+}
+
+// UnregisterClient unregisters a client from the hub
+func (h *Hub) UnregisterClient(client *Client) {
+	h.unregister <- client
+}
+
+// ReadPump pumps messages from the websocket connection to the hub
+func (c *Client) ReadPump() {
+	c.readPump()
+}
+
+// WritePump pumps messages from the hub to the websocket connection
+func (c *Client) WritePump() {
+	c.writePump()
+}

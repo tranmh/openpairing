@@ -98,15 +98,16 @@ func (gm *GameManager) updateClocks() {
 
 	for _, id := range gameIDs {
 		game := gm.GetGame(id)
-		if game == nil || game.Status != StatusOngoing {
+		if game == nil || !game.IsOngoing() {
 			continue
 		}
 
 		_, _, expired := game.UpdateClock()
 		if expired {
+			state := game.GetState()
 			gm.logger.Info().
 				Str("game_id", id.String()).
-				Str("result", game.Result).
+				Str("result", state.Result).
 				Msg("Game ended by timeout")
 		}
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"os/signal"
@@ -8,8 +9,26 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+	"github.com/openpairing/openpairing/internal/chess"
+	"github.com/openpairing/openpairing/internal/config"
+	"github.com/openpairing/openpairing/internal/database"
+	"github.com/openpairing/openpairing/internal/server"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+)
+
+var (
+	hub      *server.Hub
+	upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			// In production, check origin properly
+			return true
+		},
+	}
 )
 
 func main() {
@@ -18,6 +37,29 @@ func main() {
 	if os.Getenv("ENVIRONMENT") == "development" {
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	}
+
+	// Load configuration
+	cfg := config.Load()
+
+	// Connect to database (for game persistence)
+	db, err := database.New(&cfg.Database)
+	if err != nil {
+		log.Warn().Err(err).Msg("Database not available - games will not be persisted")
+	}
+	if db != nil {
+		defer db.Close()
+	}
+
+	// Initialize game manager
+	gameManager := chess.NewGameManager(log.Logger)
+
+	// Initialize WebSocket hub
+	hub = server.NewHub(gameManager, log.Logger)
+
+	// Start hub in background
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hub.Run(ctx)
 
 	// Create router
 	router := setupRouter()
@@ -45,6 +87,12 @@ func main() {
 	<-quit
 
 	log.Info().Msg("Chess server shutting down...")
+	cancel() // Stop the hub
+
+	// Graceful shutdown
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	srv.Shutdown(shutdownCtx)
 }
 
 func setupRouter() *gin.Engine {
@@ -74,24 +122,96 @@ func setupRouter() *gin.Engine {
 }
 
 func handleGameWebSocket(c *gin.Context) {
-	// TODO: Implement WebSocket upgrade and game handling
-	// 1. Authenticate user from JWT
-	// 2. Upgrade to WebSocket
-	// 3. Register connection with game hub
-	// 4. Handle game messages (moves, draw offers, etc.)
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error": "WebSocket game handler not yet implemented",
-	})
+	gameIDStr := c.Param("id")
+	gameID, err := uuid.Parse(gameIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid game ID"})
+		return
+	}
+
+	// Get user ID from query param or header (in production, extract from JWT)
+	userIDStr := c.Query("userId")
+	if userIDStr == "" {
+		userIDStr = c.GetHeader("X-User-ID")
+	}
+	if userIDStr == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID required"})
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		return
+	}
+
+	// Upgrade to WebSocket
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to upgrade WebSocket connection")
+		return
+	}
+
+	// Create client
+	client := &server.Client{
+		ID:          uuid.New(),
+		UserID:      userID,
+		Conn:        conn,
+		Send:        make(chan []byte, 256),
+		Hub:         hub,
+		GameID:      &gameID,
+		IsSpectator: false,
+	}
+
+	// Register client with hub
+	hub.RegisterClient(client)
+
+	// Start read and write pumps
+	go client.WritePump()
+	go client.ReadPump()
+
+	log.Info().
+		Str("game_id", gameID.String()).
+		Str("user_id", userID.String()).
+		Msg("Player connected to game")
 }
 
 func handleSpectateWebSocket(c *gin.Context) {
-	// TODO: Implement WebSocket upgrade for spectating
-	// 1. Upgrade to WebSocket
-	// 2. Subscribe to game events
-	// 3. Broadcast moves to spectators
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error": "WebSocket spectate handler not yet implemented",
-	})
+	gameIDStr := c.Param("id")
+	gameID, err := uuid.Parse(gameIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid game ID"})
+		return
+	}
+
+	// Upgrade to WebSocket
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to upgrade WebSocket connection")
+		return
+	}
+
+	// Create spectator client (no user ID required)
+	client := &server.Client{
+		ID:          uuid.New(),
+		UserID:      uuid.Nil,
+		Conn:        conn,
+		Send:        make(chan []byte, 256),
+		Hub:         hub,
+		GameID:      &gameID,
+		IsSpectator: true,
+	}
+
+	// Register client with hub
+	hub.RegisterClient(client)
+
+	// Start read and write pumps
+	go client.WritePump()
+	go client.ReadPump()
+
+	log.Info().
+		Str("game_id", gameID.String()).
+		Msg("Spectator connected to game")
 }
 
 func getEnv(key, defaultValue string) string {

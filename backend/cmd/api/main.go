@@ -31,6 +31,7 @@ import (
 	"github.com/openpairing/openpairing/internal/result"
 	"github.com/openpairing/openpairing/internal/standings"
 	"github.com/openpairing/openpairing/internal/team"
+	"github.com/openpairing/openpairing/internal/team_tournament"
 	"github.com/openpairing/openpairing/internal/tournament"
 	"github.com/openpairing/openpairing/internal/user"
 	"github.com/rs/zerolog"
@@ -147,7 +148,8 @@ func main() {
 	tournamentHandler := tournament.NewHandler(tournamentService, log.Logger)
 
 	// Arbiter service
-	arbiterService := arbiter.NewService(tournamentRepo, nil, log.Logger)
+	arbiterRepo := arbiter.NewRepository(db.Pool)
+	arbiterService := arbiter.NewService(tournamentRepo, arbiterRepo, log.Logger)
 	arbiterHandler := arbiter.NewHandler(arbiterService, log.Logger)
 
 	// Reports service
@@ -182,6 +184,11 @@ func main() {
 	teamService := team.NewService(teamRepo, log.Logger)
 	teamHandler := team.NewHandler(teamService, log.Logger)
 
+	// Team Tournament service
+	teamTournamentRepo := team_tournament.NewRepository(db.Pool)
+	teamTournamentService := team_tournament.NewService(teamTournamentRepo, tournamentRepo, teamRepo, log.Logger)
+	teamTournamentHandler := team_tournament.NewHandler(teamTournamentService, log.Logger)
+
 	// User service
 	userRepo := user.NewRepository(db.Pool)
 	userService := user.NewService(userRepo, log.Logger)
@@ -204,7 +211,7 @@ func main() {
 	}
 
 	// Create Gin router
-	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler, exportHandler, standingsHandler, resultHandler, organizationHandler, teamHandler, userHandler, gameActionHandler, fairplayHandler)
+	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler, exportHandler, standingsHandler, resultHandler, organizationHandler, teamHandler, userHandler, gameActionHandler, fairplayHandler, teamTournamentHandler)
 
 	// Create server
 	srv := &http.Server{
@@ -258,7 +265,7 @@ func main() {
 	log.Info().Msg("Server exited")
 }
 
-func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler, reportsHandler *reports.Handler, exportHandler *export.Handler, standingsHandler *standings.Handler, resultHandler *result.Handler, organizationHandler *organization.Handler, teamHandler *team.Handler, userHandler *user.Handler, gameActionHandler *gameaction.Handler, fairplayHandler *fairplay.Handler) *gin.Engine {
+func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler, reportsHandler *reports.Handler, exportHandler *export.Handler, standingsHandler *standings.Handler, resultHandler *result.Handler, organizationHandler *organization.Handler, teamHandler *team.Handler, userHandler *user.Handler, gameActionHandler *gameaction.Handler, fairplayHandler *fairplay.Handler, teamTournamentHandler *team_tournament.Handler) *gin.Engine {
 	// Set Gin mode
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -328,6 +335,9 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 
 		// Fairplay routes
 		fairplayHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireArbiter())
+
+		// Team Tournament routes
+		teamTournamentHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireOrganizer())
 
 		// Online games
 		games := v1.Group("/games")
