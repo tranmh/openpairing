@@ -77,6 +77,321 @@ const (
 	PairingScheveningen PairingSystem = "scheveningen"
 )
 
+// ByeSettings contains all configurable settings for byes, late entry, forfeits, and withdrawals
+type ByeSettings struct {
+	LateEntry          LateEntrySettings          `json:"lateEntry"`
+	HalfPointBye       HalfPointByeSettings       `json:"halfPointBye"`
+	SystemBye          SystemByeSettings          `json:"systemBye"`
+	ZeroPointBye       ZeroPointByeSettings       `json:"zeroPointBye"`
+	Forfeit            ForfeitSettings            `json:"forfeit"`
+	Withdrawal         WithdrawalSettings         `json:"withdrawal"`
+	PairingAdjustments PairingAdjustmentSettings  `json:"pairingAdjustments"`
+}
+
+// LateEntrySettings configures late entry rules
+type LateEntrySettings struct {
+	Allowed           bool    `json:"allowed"`           // FIDE: true
+	MaxRound          int     `json:"maxRound"`          // FIDE: 2
+	MissedRoundPoints float64 `json:"missedRoundPoints"` // FIDE: 0
+	RequiresApproval  bool    `json:"requiresApproval"`  // FIDE: true
+	MinRating         *int    `json:"minRating"`         // FIDE: null
+	MaxRating         *int    `json:"maxRating"`         // FIDE: null
+	PairingPriority   string  `json:"pairingPriority"`   // FIDE: "bottom" (options: bottom, by_rating, random)
+}
+
+// HalfPointByeSettings configures requested half-point bye rules
+type HalfPointByeSettings struct {
+	Allowed         bool    `json:"allowed"`         // FIDE: true
+	MaxPerPlayer    int     `json:"maxPerPlayer"`    // FIDE: 1
+	Points          float64 `json:"points"`          // FIDE: 0.5
+	AllowedRounds   string  `json:"allowedRounds"`   // FIDE: "first_half" (options: first_half, all, specific, none)
+	SpecificRounds  []int   `json:"specificRounds"`  // Used when AllowedRounds = "specific"
+	RequestDeadline string  `json:"requestDeadline"` // FIDE: "before_round1" (options: before_round1, before_each_round, anytime)
+	DeadlineHours   int     `json:"deadlineHours"`   // Hours before round if deadline = "before_each_round"
+	CountsAsGame    bool    `json:"countsAsGame"`    // For color alternation purposes
+}
+
+// SystemByeSettings configures system bye (odd player count) rules
+type SystemByeSettings struct {
+	Points                float64 `json:"points"`                // FIDE: 1.0
+	Selection             string  `json:"selection"`             // FIDE: "lowest_score_then_rating" (options below)
+	MaxPerPlayer          int     `json:"maxPerPlayer"`          // FIDE: 1
+	CountsForBuchholz     bool    `json:"countsForBuchholz"`     // FIDE: true
+	VirtualOpponentRating *int    `json:"virtualOpponentRating"` // FIDE: null (use own rating)
+	ColorAssigned         string  `json:"colorAssigned"`         // FIDE: "none" (options: none, due_color, white, black)
+}
+
+// SystemBye selection options
+const (
+	SystemByeLowestScoreThenRating = "lowest_score_then_rating" // FIDE default
+	SystemByeLowestRating          = "lowest_rating"
+	SystemByeHighestRating         = "highest_rating"
+	SystemByeRandom                = "random"
+	SystemByeRotation              = "rotation"
+	SystemByeVolunteer             = "volunteer"
+)
+
+// ZeroPointByeSettings configures zero-point bye rules
+type ZeroPointByeSettings struct {
+	Allowed         bool   `json:"allowed"`         // FIDE: true
+	MaxPerPlayer    int    `json:"maxPerPlayer"`    // FIDE: -1 (unlimited)
+	AllowedRounds   string `json:"allowedRounds"`   // FIDE: "all" (options: all, first_half, specific, none)
+	SpecificRounds  []int  `json:"specificRounds"`  // Used when AllowedRounds = "specific"
+	RequestDeadline string `json:"requestDeadline"` // FIDE: "before_each_round"
+}
+
+// ForfeitSettings configures forfeit handling rules
+type ForfeitSettings struct {
+	WinnerPoints         float64 `json:"winnerPoints"`         // FIDE: 1.0
+	LoserPoints          float64 `json:"loserPoints"`          // FIDE: 0
+	DoubleForfeitPoints  float64 `json:"doubleForfeitPoints"`  // FIDE: 0
+	AutoWithdrawAfter    int     `json:"autoWithdrawAfter"`    // FIDE: 2 (0 = disabled)
+	ConsecutiveOnly      bool    `json:"consecutiveOnly"`      // FIDE: true
+	CountsForBuchholz    string  `json:"countsForBuchholz"`    // FIDE: "as_loss" (options: as_loss, excluded, as_draw)
+	NotificationRequired bool    `json:"notificationRequired"` // FIDE: false
+	GracePeriodMinutes   int     `json:"gracePeriodMinutes"`   // FIDE: 60
+}
+
+// WithdrawalSettings configures withdrawal handling rules
+type WithdrawalSettings struct {
+	Allowed                bool    `json:"allowed"`                // FIDE: true
+	RequiresApproval       bool    `json:"requiresApproval"`       // FIDE: false
+	BuchholzMethod         string  `json:"buchholzMethod"`         // FIDE: "virtual_50_percent" (options below)
+	VirtualScorePercent    float64 `json:"virtualScorePercent"`    // FIDE: 50 (used with virtual methods)
+	ReentryAllowed         bool    `json:"reentryAllowed"`         // FIDE: false
+	ReentryMaxRoundsMissed int     `json:"reentryMaxRoundsMissed"` // Max rounds missed for reentry
+	OpponentResults        string  `json:"opponentResults"`        // FIDE: "keep" (options: keep, annul, convert_to_bye)
+}
+
+// Buchholz calculation methods for withdrawn players
+const (
+	BuchholzVirtual50Percent     = "virtual_50_percent"     // FIDE default
+	BuchholzVirtualCustomPercent = "virtual_custom_percent" // Use VirtualScorePercent
+	BuchholzActualOnly           = "actual_only"            // Only count actual games
+	BuchholzMinimumOpponent      = "minimum_opponent"       // Use lowest opponent's score
+	BuchholzExcluded             = "excluded"               // Don't count in Buchholz
+)
+
+// PairingAdjustmentSettings configures pairing behavior for byes
+type PairingAdjustmentSettings struct {
+	ByeRecipientColorPref     string `json:"byeRecipientColorPref"`     // FIDE: "due_color" (options: due_color, none, white, black)
+	ByeRecipientFloatPriority string `json:"byeRecipientFloatPriority"` // FIDE: "normal" (options: normal, down, up)
+	LateEntryColorPref        string `json:"lateEntryColorPref"`        // FIDE: "none" (options: none, white, black, random)
+	MultipleByeSameRound      string `json:"multipleByeSameRound"`      // FIDE: "sequential" (options: sequential, parallel, error)
+}
+
+// DefaultByeSettings returns FIDE-compliant default settings
+func DefaultByeSettings() *ByeSettings {
+	return &ByeSettings{
+		LateEntry: LateEntrySettings{
+			Allowed:           true,
+			MaxRound:          2,
+			MissedRoundPoints: 0,
+			RequiresApproval:  true,
+			MinRating:         nil,
+			MaxRating:         nil,
+			PairingPriority:   "bottom",
+		},
+		HalfPointBye: HalfPointByeSettings{
+			Allowed:         true,
+			MaxPerPlayer:    1,
+			Points:          0.5,
+			AllowedRounds:   "first_half",
+			SpecificRounds:  nil,
+			RequestDeadline: "before_round1",
+			DeadlineHours:   24,
+			CountsAsGame:    false,
+		},
+		SystemBye: SystemByeSettings{
+			Points:                1.0,
+			Selection:             SystemByeLowestScoreThenRating,
+			MaxPerPlayer:          1,
+			CountsForBuchholz:     true,
+			VirtualOpponentRating: nil,
+			ColorAssigned:         "none",
+		},
+		ZeroPointBye: ZeroPointByeSettings{
+			Allowed:         true,
+			MaxPerPlayer:    -1, // unlimited
+			AllowedRounds:   "all",
+			SpecificRounds:  nil,
+			RequestDeadline: "before_each_round",
+		},
+		Forfeit: ForfeitSettings{
+			WinnerPoints:         1.0,
+			LoserPoints:          0,
+			DoubleForfeitPoints:  0,
+			AutoWithdrawAfter:    2,
+			ConsecutiveOnly:      true,
+			CountsForBuchholz:    "as_loss",
+			NotificationRequired: false,
+			GracePeriodMinutes:   60,
+		},
+		Withdrawal: WithdrawalSettings{
+			Allowed:                true,
+			RequiresApproval:       false,
+			BuchholzMethod:         BuchholzVirtual50Percent,
+			VirtualScorePercent:    50,
+			ReentryAllowed:         false,
+			ReentryMaxRoundsMissed: 1,
+			OpponentResults:        "keep",
+		},
+		PairingAdjustments: PairingAdjustmentSettings{
+			ByeRecipientColorPref:     "due_color",
+			ByeRecipientFloatPriority: "normal",
+			LateEntryColorPref:        "none",
+			MultipleByeSameRound:      "sequential",
+		},
+	}
+}
+
+// FIDEViolation represents a deviation from FIDE rules
+type FIDEViolation struct {
+	Setting    string `json:"setting"`
+	Value      any    `json:"value"`
+	FIDEValue  any    `json:"fideValue"`
+	Severity   string `json:"severity"` // "warning", "info"
+	Message    string `json:"message"`
+	Regulation string `json:"regulation"` // FIDE handbook reference
+}
+
+// ValidateFIDECompliance checks settings against FIDE rules and returns violations
+func (s *ByeSettings) ValidateFIDECompliance(totalRounds int) []FIDEViolation {
+	var violations []FIDEViolation
+
+	// Late Entry violations
+	if s.LateEntry.MaxRound > totalRounds/2 {
+		violations = append(violations, FIDEViolation{
+			Setting:    "lateEntry.maxRound",
+			Value:      s.LateEntry.MaxRound,
+			FIDEValue:  totalRounds / 2,
+			Severity:   "warning",
+			Message:    "FIDE recommends late entry only in first half of tournament",
+			Regulation: "FIDE Handbook C.04.2.B",
+		})
+	}
+	if s.LateEntry.MissedRoundPoints > 0 {
+		violations = append(violations, FIDEViolation{
+			Setting:    "lateEntry.missedRoundPoints",
+			Value:      s.LateEntry.MissedRoundPoints,
+			FIDEValue:  0,
+			Severity:   "warning",
+			Message:    "FIDE awards 0 points for missed rounds due to late entry",
+			Regulation: "FIDE Handbook C.04.2.B",
+		})
+	}
+
+	// Half-Point Bye violations
+	if s.HalfPointBye.MaxPerPlayer > 1 {
+		violations = append(violations, FIDEViolation{
+			Setting:    "halfPointBye.maxPerPlayer",
+			Value:      s.HalfPointBye.MaxPerPlayer,
+			FIDEValue:  1,
+			Severity:   "warning",
+			Message:    "FIDE allows maximum 1 half-point bye per player",
+			Regulation: "FIDE Handbook C.04.1.f",
+		})
+	}
+	if s.HalfPointBye.Points != 0.5 {
+		violations = append(violations, FIDEViolation{
+			Setting:    "halfPointBye.points",
+			Value:      s.HalfPointBye.Points,
+			FIDEValue:  0.5,
+			Severity:   "warning",
+			Message:    "FIDE awards exactly 0.5 points for requested bye",
+			Regulation: "FIDE Handbook C.04.1.f",
+		})
+	}
+	if s.HalfPointBye.AllowedRounds == "all" {
+		violations = append(violations, FIDEViolation{
+			Setting:    "halfPointBye.allowedRounds",
+			Value:      s.HalfPointBye.AllowedRounds,
+			FIDEValue:  "first_half",
+			Severity:   "warning",
+			Message:    "FIDE restricts half-point byes to first half of tournament",
+			Regulation: "FIDE Handbook C.04.1.f",
+		})
+	}
+
+	// System Bye violations
+	if s.SystemBye.Points != 1.0 {
+		violations = append(violations, FIDEViolation{
+			Setting:    "systemBye.points",
+			Value:      s.SystemBye.Points,
+			FIDEValue:  1.0,
+			Severity:   "warning",
+			Message:    "FIDE awards 1 point for system bye (odd player)",
+			Regulation: "FIDE Handbook C.04.1.e",
+		})
+	}
+	if s.SystemBye.MaxPerPlayer > 1 {
+		violations = append(violations, FIDEViolation{
+			Setting:    "systemBye.maxPerPlayer",
+			Value:      s.SystemBye.MaxPerPlayer,
+			FIDEValue:  1,
+			Severity:   "warning",
+			Message:    "FIDE: a player should not receive more than 1 system bye",
+			Regulation: "FIDE Handbook C.04.1.e",
+		})
+	}
+
+	// Forfeit violations
+	if s.Forfeit.GracePeriodMinutes > 60 {
+		violations = append(violations, FIDEViolation{
+			Setting:    "forfeit.gracePeriodMinutes",
+			Value:      s.Forfeit.GracePeriodMinutes,
+			FIDEValue:  60,
+			Severity:   "info",
+			Message:    "FIDE default forfeit time is 60 minutes",
+			Regulation: "FIDE Laws of Chess 6.7",
+		})
+	}
+	if s.Forfeit.AutoWithdrawAfter == 0 {
+		violations = append(violations, FIDEViolation{
+			Setting:    "forfeit.autoWithdrawAfter",
+			Value:      0,
+			FIDEValue:  2,
+			Severity:   "info",
+			Message:    "FIDE recommends auto-withdrawal after 2 consecutive forfeits",
+			Regulation: "FIDE Handbook C.04.3",
+		})
+	}
+	if !s.Forfeit.ConsecutiveOnly {
+		violations = append(violations, FIDEViolation{
+			Setting:    "forfeit.consecutiveOnly",
+			Value:      false,
+			FIDEValue:  true,
+			Severity:   "warning",
+			Message:    "FIDE counts only consecutive forfeits for auto-withdrawal",
+			Regulation: "FIDE Handbook C.04.3",
+		})
+	}
+
+	// Withdrawal violations
+	if s.Withdrawal.BuchholzMethod != BuchholzVirtual50Percent {
+		violations = append(violations, FIDEViolation{
+			Setting:    "withdrawal.buchholzMethod",
+			Value:      s.Withdrawal.BuchholzMethod,
+			FIDEValue:  BuchholzVirtual50Percent,
+			Severity:   "warning",
+			Message:    "FIDE uses virtual 50% continuation for withdrawn players in Buchholz",
+			Regulation: "FIDE Handbook C.02.13.4",
+		})
+	}
+	if s.Withdrawal.OpponentResults != "keep" {
+		violations = append(violations, FIDEViolation{
+			Setting:    "withdrawal.opponentResults",
+			Value:      s.Withdrawal.OpponentResults,
+			FIDEValue:  "keep",
+			Severity:   "warning",
+			Message:    "FIDE keeps all results against withdrawn players",
+			Regulation: "FIDE Handbook C.04.3",
+		})
+	}
+
+	return violations
+}
+
 // Tournament represents a chess tournament
 type Tournament struct {
 	ID             uuid.UUID        `json:"id" db:"id"`
@@ -133,6 +448,9 @@ type Tournament struct {
 	// Tiebreaks (JSON array)
 	Tiebreaks []string `json:"tiebreaks" db:"tiebreaks"`
 
+	// Bye Settings (JSON) - configurable bye, forfeit, withdrawal rules
+	ByeSettings *ByeSettings `json:"byeSettings,omitempty" db:"bye_settings"`
+
 	// Settings (JSON)
 	Settings map[string]interface{} `json:"settings,omitempty" db:"settings"`
 
@@ -184,7 +502,17 @@ type Participant struct {
 
 	// Status
 	IsActive    bool     `json:"isActive" db:"is_active"`
-	ByeRequests []int    `json:"byeRequests" db:"bye_requests"`
+	ByeRequests []int    `json:"byeRequests" db:"bye_requests"` // Rounds where half-point bye requested
+
+	// Bye Tracking
+	HalfPointByesUsed  int   `json:"halfPointByesUsed" db:"half_point_byes_used"`   // Count of half-point byes taken
+	ZeroPointByesUsed  int   `json:"zeroPointByesUsed" db:"zero_point_byes_used"`   // Count of zero-point byes taken
+	SystemByeRound     *int  `json:"systemByeRound,omitempty" db:"system_bye_round"` // Round where system bye received (null if none)
+	ForfeitCount       int   `json:"forfeitCount" db:"forfeit_count"`               // Total forfeits
+	ConsecutiveForfeits int  `json:"consecutiveForfeits" db:"consecutive_forfeits"` // Current consecutive forfeit streak
+	LateEntryRound     *int  `json:"lateEntryRound,omitempty" db:"late_entry_round"` // Round joined (null if joined before start)
+	WithdrawnRound     *int  `json:"withdrawnRound,omitempty" db:"withdrawn_round"`  // Round withdrawn (null if still active)
+	WithdrawalReason   *string `json:"withdrawalReason,omitempty" db:"withdrawal_reason"` // Reason for withdrawal
 
 	// Payment
 	PaymentStatus    string  `json:"paymentStatus" db:"payment_status"`

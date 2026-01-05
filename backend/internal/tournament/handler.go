@@ -68,6 +68,20 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 			organizer.PUT("/:id/participants/:participantId/rating-override", h.SetRatingOverride)
 			organizer.DELETE("/:id/participants/:participantId/rating-override", h.ClearRatingOverride)
 
+			// Bye settings management (organizer only)
+			organizer.GET("/:id/bye-settings", h.GetByeSettings)
+			organizer.PUT("/:id/bye-settings", h.UpdateByeSettings)
+			organizer.GET("/:id/fide-violations", h.GetFIDEViolations)
+
+			// Bye request management (organizer only)
+			organizer.POST("/:id/participants/:participantId/bye-request", h.RequestHalfPointBye)
+			organizer.DELETE("/:id/participants/:participantId/bye-request/:round", h.CancelByeRequest)
+			organizer.GET("/:id/participants/:participantId/bye-status", h.GetParticipantByeStatus)
+
+			// Late entry and withdrawal (organizer only)
+			organizer.POST("/:id/late-entry", h.AddLateEntry)
+			organizer.POST("/:id/participants/:participantId/withdraw", h.WithdrawWithReason)
+
 			// Rounds & Pairings (organizer only)
 			organizer.POST("/:id/rounds/:round/pair", h.GeneratePairings)
 			organizer.POST("/:id/rounds/:round/start", h.StartRound)
@@ -891,6 +905,254 @@ func (h *Handler) ClearRatingOverride(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// GetByeSettings gets bye settings for a tournament
+// @Summary Get bye settings
+// @Tags tournaments
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Success 200 {object} ByeSettingsResponse
+// @Router /tournaments/{id}/bye-settings [get]
+func (h *Handler) GetByeSettings(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	settings, err := h.service.GetByeSettings(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, ByeSettingsResponse{ByeSettings: settings})
+}
+
+// UpdateByeSettings updates bye settings for a tournament
+// @Summary Update bye settings
+// @Tags tournaments
+// @Accept json
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param request body ByeSettings true "Bye settings"
+// @Success 200 {object} ByeSettingsUpdateResponse
+// @Router /tournaments/{id}/bye-settings [put]
+func (h *Handler) UpdateByeSettings(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	var settings ByeSettings
+	if err := c.ShouldBindJSON(&settings); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	tournament, violations, err := h.service.UpdateByeSettings(c.Request.Context(), id, &settings)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, ByeSettingsUpdateResponse{
+		Tournament:     tournament,
+		FIDEViolations: violations,
+	})
+}
+
+// GetFIDEViolations gets FIDE rule violations for current bye settings
+// @Summary Get FIDE violations
+// @Tags tournaments
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Success 200 {object} FIDEViolationsResponse
+// @Router /tournaments/{id}/fide-violations [get]
+func (h *Handler) GetFIDEViolations(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	violations, err := h.service.GetFIDEViolations(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, FIDEViolationsResponse{Violations: violations})
+}
+
+// RequestHalfPointBye requests a half-point bye for a participant
+// @Summary Request half-point bye
+// @Tags tournaments
+// @Accept json
+// @Param id path string true "Tournament ID"
+// @Param participantId path string true "Participant ID"
+// @Param request body ByeRequestRequest true "Bye request"
+// @Success 204
+// @Router /tournaments/{id}/participants/{participantId}/bye-request [post]
+func (h *Handler) RequestHalfPointBye(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	participantID, err := uuid.Parse(c.Param("participantId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid participant ID"})
+		return
+	}
+
+	var req ByeRequestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.service.RequestHalfPointBye(c.Request.Context(), id, participantID, req.Round); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// CancelByeRequest cancels a bye request for a participant
+// @Summary Cancel bye request
+// @Tags tournaments
+// @Param id path string true "Tournament ID"
+// @Param participantId path string true "Participant ID"
+// @Param round path int true "Round number"
+// @Success 204
+// @Router /tournaments/{id}/participants/{participantId}/bye-request/{round} [delete]
+func (h *Handler) CancelByeRequest(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	participantID, err := uuid.Parse(c.Param("participantId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid participant ID"})
+		return
+	}
+
+	round, err := strconv.Atoi(c.Param("round"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid round number"})
+		return
+	}
+
+	if err := h.service.CancelByeRequest(c.Request.Context(), id, participantID, round); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// GetParticipantByeStatus gets detailed bye/withdrawal status for a participant
+// @Summary Get participant bye status
+// @Tags tournaments
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param participantId path string true "Participant ID"
+// @Success 200 {object} ParticipantByeStatusResponse
+// @Router /tournaments/{id}/participants/{participantId}/bye-status [get]
+func (h *Handler) GetParticipantByeStatus(c *gin.Context) {
+	participantID, err := uuid.Parse(c.Param("participantId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid participant ID"})
+		return
+	}
+
+	status, err := h.service.GetParticipantByeStatus(c.Request.Context(), participantID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, ParticipantByeStatusResponse{Status: status})
+}
+
+// AddLateEntry adds a late entry participant
+// @Summary Add late entry
+// @Tags tournaments
+// @Accept json
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param request body LateEntryRequest true "Late entry data"
+// @Success 201 {object} ParticipantResponse
+// @Router /tournaments/{id}/late-entry [post]
+func (h *Handler) AddLateEntry(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	var req LateEntryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	regReq := &RegisterParticipantRequest{
+		PlayerID:       req.PlayerID,
+		SectionID:      req.SectionID,
+		StartingRating: req.StartingRating,
+	}
+
+	participant, err := h.service.AddLateEntry(c.Request.Context(), id, regReq, req.EntryRound)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, ParticipantResponse{Participant: participant})
+}
+
+// WithdrawWithReason withdraws a participant with reason tracking
+// @Summary Withdraw participant with reason
+// @Tags tournaments
+// @Accept json
+// @Param id path string true "Tournament ID"
+// @Param participantId path string true "Participant ID"
+// @Param request body WithdrawRequest true "Withdrawal data"
+// @Success 204
+// @Router /tournaments/{id}/participants/{participantId}/withdraw [post]
+func (h *Handler) WithdrawWithReason(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	participantID, err := uuid.Parse(c.Param("participantId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid participant ID"})
+		return
+	}
+
+	var req WithdrawRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Allow empty body for simple withdrawal
+		req = WithdrawRequest{}
+	}
+
+	if err := h.service.WithdrawParticipantWithDetails(c.Request.Context(), id, participantID, req.Reason); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 // Response types
 
 // TournamentResponse wraps a tournament
@@ -970,6 +1232,45 @@ type EnterResultRequest struct {
 // SetRatingOverrideRequest for setting a manual rating override
 type SetRatingOverrideRequest struct {
 	Rating int `json:"rating" binding:"required,min=0"`
+}
+
+// ByeSettingsResponse wraps bye settings
+type ByeSettingsResponse struct {
+	ByeSettings *ByeSettings `json:"byeSettings"`
+}
+
+// ByeSettingsUpdateResponse wraps updated tournament with FIDE violations
+type ByeSettingsUpdateResponse struct {
+	Tournament     *Tournament     `json:"tournament"`
+	FIDEViolations []FIDEViolation `json:"fideViolations,omitempty"`
+}
+
+// FIDEViolationsResponse wraps FIDE violations
+type FIDEViolationsResponse struct {
+	Violations []FIDEViolation `json:"violations"`
+}
+
+// ByeRequestRequest for requesting a bye
+type ByeRequestRequest struct {
+	Round int `json:"round" binding:"required,min=1"`
+}
+
+// LateEntryRequest for adding a late entry
+type LateEntryRequest struct {
+	PlayerID       uuid.UUID  `json:"playerId" binding:"required"`
+	SectionID      *uuid.UUID `json:"sectionId"`
+	StartingRating int        `json:"startingRating"`
+	EntryRound     int        `json:"entryRound" binding:"required,min=2"`
+}
+
+// WithdrawRequest for withdrawing with reason
+type WithdrawRequest struct {
+	Reason string `json:"reason"`
+}
+
+// ParticipantByeStatusResponse wraps participant bye status
+type ParticipantByeStatusResponse struct {
+	Status *ParticipantByeStatus `json:"status"`
 }
 
 // TournamentFilter helper for StartDate/EndDate

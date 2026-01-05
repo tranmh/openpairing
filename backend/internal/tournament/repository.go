@@ -119,6 +119,7 @@ func (r *PostgresRepository) Create(ctx context.Context, t *Tournament) error {
 
 	tiebreaksJSON, _ := json.Marshal(t.Tiebreaks)
 	settingsJSON, _ := json.Marshal(t.Settings)
+	byeSettingsJSON, _ := json.Marshal(t.ByeSettings)
 
 	query := `
 		INSERT INTO tournaments (
@@ -130,7 +131,7 @@ func (r *PostgresRepository) Create(ctx context.Context, t *Tournament) error {
 			venue_name, venue_address, venue_city, venue_country,
 			fide_rated, dwz_rated, oesb_rated,
 			entry_fee_cents, currency, status,
-			tiebreaks, settings, current_round, participant_count,
+			tiebreaks, settings, bye_settings, current_round, participant_count,
 			created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5,
@@ -141,8 +142,8 @@ func (r *PostgresRepository) Create(ctx context.Context, t *Tournament) error {
 			$20, $21, $22, $23,
 			$24, $25, $26,
 			$27, $28, $29,
-			$30, $31, $32, $33,
-			$34, $35
+			$30, $31, $32, $33, $34,
+			$35, $36
 		)`
 
 	_, err := r.db.Exec(ctx, query,
@@ -154,7 +155,7 @@ func (r *PostgresRepository) Create(ctx context.Context, t *Tournament) error {
 		t.VenueName, t.VenueAddress, t.VenueCity, t.VenueCountry,
 		t.FideRated, t.DwzRated, t.OesbRated,
 		t.EntryFeeCents, t.Currency, t.Status,
-		tiebreaksJSON, settingsJSON, t.CurrentRound, t.ParticipantCount,
+		tiebreaksJSON, settingsJSON, byeSettingsJSON, t.CurrentRound, t.ParticipantCount,
 		t.CreatedAt, t.UpdatedAt,
 	)
 
@@ -176,12 +177,12 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (*Tourna
 			venue_name, venue_address, venue_city, venue_country,
 			fide_rated, dwz_rated, oesb_rated,
 			entry_fee_cents, currency, status, ratings_locked_at,
-			tiebreaks, settings, current_round, participant_count,
+			tiebreaks, settings, bye_settings, current_round, participant_count,
 			created_at, updated_at
 		FROM tournaments WHERE id = $1`
 
 	var t Tournament
-	var tiebreaksJSON, settingsJSON []byte
+	var tiebreaksJSON, settingsJSON, byeSettingsJSON []byte
 
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&t.ID, &t.OrganizationID, &t.Name, &t.Description, &t.Slug,
@@ -192,7 +193,7 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (*Tourna
 		&t.VenueName, &t.VenueAddress, &t.VenueCity, &t.VenueCountry,
 		&t.FideRated, &t.DwzRated, &t.OesbRated,
 		&t.EntryFeeCents, &t.Currency, &t.Status, &t.RatingsLockedAt,
-		&tiebreaksJSON, &settingsJSON, &t.CurrentRound, &t.ParticipantCount,
+		&tiebreaksJSON, &settingsJSON, &byeSettingsJSON, &t.CurrentRound, &t.ParticipantCount,
 		&t.CreatedAt, &t.UpdatedAt,
 	)
 
@@ -205,6 +206,9 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (*Tourna
 
 	json.Unmarshal(tiebreaksJSON, &t.Tiebreaks)
 	json.Unmarshal(settingsJSON, &t.Settings)
+	if byeSettingsJSON != nil {
+		json.Unmarshal(byeSettingsJSON, &t.ByeSettings)
+	}
 
 	return &t, nil
 }
@@ -227,6 +231,7 @@ func (r *PostgresRepository) Update(ctx context.Context, t *Tournament) error {
 
 	tiebreaksJSON, _ := json.Marshal(t.Tiebreaks)
 	settingsJSON, _ := json.Marshal(t.Settings)
+	byeSettingsJSON, _ := json.Marshal(t.ByeSettings)
 
 	query := `
 		UPDATE tournaments SET
@@ -239,9 +244,9 @@ func (r *PostgresRepository) Update(ctx context.Context, t *Tournament) error {
 			venue_name = $14, venue_address = $15, venue_city = $16,
 			fide_rated = $17, dwz_rated = $18, oesb_rated = $19,
 			entry_fee_cents = $20, status = $21, ratings_locked_at = $22,
-			tiebreaks = $23, settings = $24,
-			current_round = $25, participant_count = $26,
-			updated_at = $27
+			tiebreaks = $23, settings = $24, bye_settings = $25,
+			current_round = $26, participant_count = $27,
+			updated_at = $28
 		WHERE id = $1`
 
 	result, err := r.db.Exec(ctx, query,
@@ -254,7 +259,7 @@ func (r *PostgresRepository) Update(ctx context.Context, t *Tournament) error {
 		t.VenueName, t.VenueAddress, t.VenueCity,
 		t.FideRated, t.DwzRated, t.OesbRated,
 		t.EntryFeeCents, t.Status, t.RatingsLockedAt,
-		tiebreaksJSON, settingsJSON,
+		tiebreaksJSON, settingsJSON, byeSettingsJSON,
 		t.CurrentRound, t.ParticipantCount,
 		t.UpdatedAt,
 	)
@@ -337,7 +342,7 @@ func (r *PostgresRepository) List(ctx context.Context, filters *ListFilters) ([]
 			venue_name, venue_address, venue_city, venue_country,
 			fide_rated, dwz_rated, oesb_rated,
 			entry_fee_cents, currency, status, ratings_locked_at,
-			tiebreaks, settings, current_round, participant_count,
+			tiebreaks, settings, bye_settings, current_round, participant_count,
 			created_at, updated_at
 		FROM tournaments
 		%s
@@ -354,7 +359,7 @@ func (r *PostgresRepository) List(ctx context.Context, filters *ListFilters) ([]
 	var tournaments []Tournament
 	for rows.Next() {
 		var t Tournament
-		var tiebreaksJSON, settingsJSON []byte
+		var tiebreaksJSON, settingsJSON, byeSettingsJSON []byte
 
 		err := rows.Scan(
 			&t.ID, &t.OrganizationID, &t.Name, &t.Description, &t.Slug,
@@ -365,7 +370,7 @@ func (r *PostgresRepository) List(ctx context.Context, filters *ListFilters) ([]
 			&t.VenueName, &t.VenueAddress, &t.VenueCity, &t.VenueCountry,
 			&t.FideRated, &t.DwzRated, &t.OesbRated,
 			&t.EntryFeeCents, &t.Currency, &t.Status, &t.RatingsLockedAt,
-			&tiebreaksJSON, &settingsJSON, &t.CurrentRound, &t.ParticipantCount,
+			&tiebreaksJSON, &settingsJSON, &byeSettingsJSON, &t.CurrentRound, &t.ParticipantCount,
 			&t.CreatedAt, &t.UpdatedAt,
 		)
 		if err != nil {
@@ -374,6 +379,9 @@ func (r *PostgresRepository) List(ctx context.Context, filters *ListFilters) ([]
 
 		json.Unmarshal(tiebreaksJSON, &t.Tiebreaks)
 		json.Unmarshal(settingsJSON, &t.Settings)
+		if byeSettingsJSON != nil {
+			json.Unmarshal(byeSettingsJSON, &t.ByeSettings)
+		}
 
 		tournaments = append(tournaments, t)
 	}
@@ -403,14 +411,20 @@ func (r *PostgresRepository) AddParticipant(ctx context.Context, p *Participant)
 			start_rank, starting_rating,
 			points, buchholz, buchholz_cut1, sonneborn_berger,
 			wins, draws, losses, is_active, bye_requests,
-			payment_status, payment_reference
+			payment_status, payment_reference,
+			half_point_byes_used, zero_point_byes_used, system_bye_round,
+			forfeit_count, consecutive_forfeits, late_entry_round,
+			withdrawn_round, withdrawal_reason
 		) VALUES (
 			$1, $2, $3, $4,
 			$5, $6,
 			$7, $8,
 			$9, $10, $11, $12,
 			$13, $14, $15, $16, $17,
-			$18, $19
+			$18, $19,
+			$20, $21, $22,
+			$23, $24, $25,
+			$26, $27
 		)`
 
 	_, err := r.db.Exec(ctx, query,
@@ -420,6 +434,9 @@ func (r *PostgresRepository) AddParticipant(ctx context.Context, p *Participant)
 		p.Points, p.Buchholz, p.BuchholzCut1, p.SonnebornBerger,
 		p.Wins, p.Draws, p.Losses, p.IsActive, byeRequestsJSON,
 		p.PaymentStatus, p.PaymentReference,
+		p.HalfPointByesUsed, p.ZeroPointByesUsed, p.SystemByeRound,
+		p.ForfeitCount, p.ConsecutiveForfeits, p.LateEntryRound,
+		p.WithdrawnRound, p.WithdrawalReason,
 	)
 
 	if err != nil {
@@ -446,6 +463,9 @@ func (r *PostgresRepository) GetParticipant(ctx context.Context, id uuid.UUID) (
 			tp.points, tp.buchholz, tp.buchholz_cut1, tp.sonneborn_berger,
 			tp.wins, tp.draws, tp.losses, tp.is_active, tp.bye_requests,
 			tp.payment_status, tp.payment_reference,
+			tp.half_point_byes_used, tp.zero_point_byes_used, tp.system_bye_round,
+			tp.forfeit_count, tp.consecutive_forfeits, tp.late_entry_round,
+			tp.withdrawn_round, tp.withdrawal_reason,
 			p.first_name, p.last_name, p.fide_id
 		FROM tournament_participants tp
 		JOIN players p ON tp.player_id = p.id
@@ -461,6 +481,9 @@ func (r *PostgresRepository) GetParticipant(ctx context.Context, id uuid.UUID) (
 		&participant.Points, &participant.Buchholz, &participant.BuchholzCut1, &participant.SonnebornBerger,
 		&participant.Wins, &participant.Draws, &participant.Losses, &participant.IsActive, &byeRequestsJSON,
 		&participant.PaymentStatus, &participant.PaymentReference,
+		&participant.HalfPointByesUsed, &participant.ZeroPointByesUsed, &participant.SystemByeRound,
+		&participant.ForfeitCount, &participant.ConsecutiveForfeits, &participant.LateEntryRound,
+		&participant.WithdrawnRound, &participant.WithdrawalReason,
 		&participant.PlayerFirstName, &participant.PlayerLastName, &participant.PlayerFideID,
 	)
 
@@ -498,7 +521,10 @@ func (r *PostgresRepository) UpdateParticipant(ctx context.Context, p *Participa
 			start_rank = $3, starting_rating = $4, manual_rating_override = $5,
 			points = $6, buchholz = $7, buchholz_cut1 = $8, sonneborn_berger = $9,
 			wins = $10, draws = $11, losses = $12, is_active = $13, bye_requests = $14,
-			payment_status = $15, payment_reference = $16
+			payment_status = $15, payment_reference = $16,
+			half_point_byes_used = $17, zero_point_byes_used = $18, system_bye_round = $19,
+			forfeit_count = $20, consecutive_forfeits = $21, late_entry_round = $22,
+			withdrawn_round = $23, withdrawal_reason = $24
 		WHERE id = $1`
 
 	result, err := r.db.Exec(ctx, query,
@@ -507,6 +533,9 @@ func (r *PostgresRepository) UpdateParticipant(ctx context.Context, p *Participa
 		p.Points, p.Buchholz, p.BuchholzCut1, p.SonnebornBerger,
 		p.Wins, p.Draws, p.Losses, p.IsActive, byeRequestsJSON,
 		p.PaymentStatus, p.PaymentReference,
+		p.HalfPointByesUsed, p.ZeroPointByesUsed, p.SystemByeRound,
+		p.ForfeitCount, p.ConsecutiveForfeits, p.LateEntryRound,
+		p.WithdrawnRound, p.WithdrawalReason,
 	)
 
 	if err != nil {
@@ -555,6 +584,9 @@ func (r *PostgresRepository) ListParticipants(ctx context.Context, tournamentID 
 			tp.points, tp.buchholz, tp.buchholz_cut1, tp.sonneborn_berger,
 			tp.wins, tp.draws, tp.losses, tp.is_active, tp.bye_requests,
 			tp.payment_status, tp.payment_reference,
+			tp.half_point_byes_used, tp.zero_point_byes_used, tp.system_bye_round,
+			tp.forfeit_count, tp.consecutive_forfeits, tp.late_entry_round,
+			tp.withdrawn_round, tp.withdrawal_reason,
 			p.first_name, p.last_name, p.fide_id,
 			c.name as club_name
 		FROM tournament_participants tp
@@ -581,6 +613,9 @@ func (r *PostgresRepository) ListParticipants(ctx context.Context, tournamentID 
 			&p.Points, &p.Buchholz, &p.BuchholzCut1, &p.SonnebornBerger,
 			&p.Wins, &p.Draws, &p.Losses, &p.IsActive, &byeRequestsJSON,
 			&p.PaymentStatus, &p.PaymentReference,
+			&p.HalfPointByesUsed, &p.ZeroPointByesUsed, &p.SystemByeRound,
+			&p.ForfeitCount, &p.ConsecutiveForfeits, &p.LateEntryRound,
+			&p.WithdrawnRound, &p.WithdrawalReason,
 			&p.PlayerFirstName, &p.PlayerLastName, &p.PlayerFideID,
 			&p.PlayerClubName,
 		)
@@ -604,6 +639,9 @@ func (r *PostgresRepository) GetStandings(ctx context.Context, tournamentID uuid
 			tp.points, tp.buchholz, tp.buchholz_cut1, tp.sonneborn_berger,
 			tp.wins, tp.draws, tp.losses, tp.is_active, tp.bye_requests,
 			tp.payment_status, tp.payment_reference,
+			tp.half_point_byes_used, tp.zero_point_byes_used, tp.system_bye_round,
+			tp.forfeit_count, tp.consecutive_forfeits, tp.late_entry_round,
+			tp.withdrawn_round, tp.withdrawal_reason,
 			p.first_name, p.last_name, p.fide_id,
 			c.name as club_name
 		FROM tournament_participants tp
@@ -630,6 +668,9 @@ func (r *PostgresRepository) GetStandings(ctx context.Context, tournamentID uuid
 			&p.Points, &p.Buchholz, &p.BuchholzCut1, &p.SonnebornBerger,
 			&p.Wins, &p.Draws, &p.Losses, &p.IsActive, &byeRequestsJSON,
 			&p.PaymentStatus, &p.PaymentReference,
+			&p.HalfPointByesUsed, &p.ZeroPointByesUsed, &p.SystemByeRound,
+			&p.ForfeitCount, &p.ConsecutiveForfeits, &p.LateEntryRound,
+			&p.WithdrawnRound, &p.WithdrawalReason,
 			&p.PlayerFirstName, &p.PlayerLastName, &p.PlayerFideID,
 			&p.PlayerClubName,
 		)

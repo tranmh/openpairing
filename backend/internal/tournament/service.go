@@ -1837,3 +1837,501 @@ func (s *Service) SetParticipantRatingOverride(ctx context.Context, participantI
 
 	return nil
 }
+
+// UpdateByeSettings updates the bye settings for a tournament
+func (s *Service) UpdateByeSettings(ctx context.Context, tournamentID uuid.UUID, settings *ByeSettings) (*Tournament, []FIDEViolation, error) {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Only allow updates before tournament completes
+	if tournament.Status == StatusCompleted || tournament.Status == StatusCancelled {
+		return nil, nil, fmt.Errorf("cannot update bye settings for %s tournament", tournament.Status)
+	}
+
+	tournament.ByeSettings = settings
+	tournament.UpdatedAt = time.Now()
+
+	if err := s.repo.Update(ctx, tournament); err != nil {
+		return nil, nil, fmt.Errorf("failed to update tournament: %w", err)
+	}
+
+	// Check for FIDE violations and return warnings
+	var violations []FIDEViolation
+	if settings != nil {
+		violations = settings.ValidateFIDECompliance(tournament.Rounds)
+	}
+
+	s.logger.Info().
+		Str("tournament_id", tournamentID.String()).
+		Int("violations", len(violations)).
+		Msg("Bye settings updated")
+
+	return tournament, violations, nil
+}
+
+// GetByeSettings returns the bye settings for a tournament (with defaults if not set)
+func (s *Service) GetByeSettings(ctx context.Context, tournamentID uuid.UUID) (*ByeSettings, error) {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	if tournament.ByeSettings != nil {
+		return tournament.ByeSettings, nil
+	}
+
+	// Return default settings
+	return DefaultByeSettings(), nil
+}
+
+// RequestHalfPointBye requests a half-point bye for a participant in a specific round
+func (s *Service) RequestHalfPointBye(ctx context.Context, tournamentID, participantID uuid.UUID, roundNumber int) error {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return err
+	}
+
+	participant, err := s.repo.GetParticipant(ctx, participantID)
+	if err != nil {
+		return err
+	}
+
+	if participant.TournamentID != tournamentID {
+		return fmt.Errorf("participant not in this tournament")
+	}
+
+	settings := tournament.ByeSettings
+	if settings == nil {
+		settings = DefaultByeSettings()
+	}
+
+	// Check if half-point byes are allowed
+	if !settings.HalfPointBye.Allowed {
+		return fmt.Errorf("half-point byes are not allowed in this tournament")
+	}
+
+	// Validate round number is within valid range
+	if roundNumber < 1 {
+		return fmt.Errorf("invalid round number: must be at least 1")
+	}
+	if roundNumber > tournament.Rounds {
+		return fmt.Errorf("invalid round number: tournament only has %d rounds", tournament.Rounds)
+	}
+
+	// Check maximum per player limit
+	if settings.HalfPointBye.MaxPerPlayer > 0 && participant.HalfPointByesUsed >= settings.HalfPointBye.MaxPerPlayer {
+		return fmt.Errorf("player has reached maximum half-point byes (%d)", settings.HalfPointBye.MaxPerPlayer)
+	}
+
+	// Check if round is within allowed range based on AllowedRounds setting
+	if settings.HalfPointBye.AllowedRounds == "first_half" {
+		halfRounds := tournament.Rounds / 2
+		if roundNumber > halfRounds {
+			return fmt.Errorf("half-point byes only allowed in first half (rounds 1-%d)", halfRounds)
+		}
+	} else if settings.HalfPointBye.AllowedRounds == "specific" {
+		allowed := false
+		for _, r := range settings.HalfPointBye.SpecificRounds {
+			if r == roundNumber {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Errorf("half-point bye not allowed in round %d", roundNumber)
+		}
+	} else if settings.HalfPointBye.AllowedRounds == "none" {
+		return fmt.Errorf("half-point byes are not allowed in any round")
+	}
+
+	// Check if already requested for this round
+	for _, r := range participant.ByeRequests {
+		if r == roundNumber {
+			return fmt.Errorf("bye already requested for round %d", roundNumber)
+		}
+	}
+
+	// Add to bye requests
+	participant.ByeRequests = append(participant.ByeRequests, roundNumber)
+
+	if err := s.repo.UpdateParticipant(ctx, participant); err != nil {
+		return fmt.Errorf("failed to update participant: %w", err)
+	}
+
+	s.logger.Info().
+		Str("tournament_id", tournamentID.String()).
+		Str("participant_id", participantID.String()).
+		Int("round", roundNumber).
+		Msg("Half-point bye requested")
+
+	return nil
+}
+
+// CancelByeRequest cancels a bye request for a participant
+func (s *Service) CancelByeRequest(ctx context.Context, tournamentID, participantID uuid.UUID, roundNumber int) error {
+	participant, err := s.repo.GetParticipant(ctx, participantID)
+	if err != nil {
+		return err
+	}
+
+	if participant.TournamentID != tournamentID {
+		return fmt.Errorf("participant not in this tournament")
+	}
+
+	// Check if request exists and find its index
+	foundIndex := -1
+	for i, r := range participant.ByeRequests {
+		if r == roundNumber {
+			foundIndex = i
+			break
+		}
+	}
+	if foundIndex == -1 {
+		return fmt.Errorf("no bye request found for round %d", roundNumber)
+	}
+
+	// Check if round is already paired
+	round, err := s.repo.GetRoundByNumber(ctx, tournamentID, roundNumber)
+	if err == nil && round != nil && round.Status != RoundStatusPending {
+		return fmt.Errorf("cannot cancel bye request - round %d is already paired", roundNumber)
+	}
+
+	// Remove from slice
+	participant.ByeRequests = append(participant.ByeRequests[:foundIndex], participant.ByeRequests[foundIndex+1:]...)
+
+	if err := s.repo.UpdateParticipant(ctx, participant); err != nil {
+		return fmt.Errorf("failed to update participant: %w", err)
+	}
+
+	s.logger.Info().
+		Str("tournament_id", tournamentID.String()).
+		Str("participant_id", participantID.String()).
+		Int("round", roundNumber).
+		Msg("Bye request cancelled")
+
+	return nil
+}
+
+// RecordSystemBye records that a participant received a system bye
+func (s *Service) RecordSystemBye(ctx context.Context, tournamentID, participantID uuid.UUID, roundNumber int) error {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return err
+	}
+
+	participant, err := s.repo.GetParticipant(ctx, participantID)
+	if err != nil {
+		return err
+	}
+
+	if participant.TournamentID != tournamentID {
+		return fmt.Errorf("participant not in this tournament")
+	}
+
+	settings := tournament.ByeSettings
+	if settings == nil {
+		settings = DefaultByeSettings()
+	}
+
+	// Check if player already received system bye (FIDE: only once per tournament)
+	// MaxPerPlayer of 1 means only one system bye allowed
+	if participant.SystemByeRound != nil && settings.SystemBye.MaxPerPlayer == 1 {
+		return fmt.Errorf("player already received system bye in round %d", *participant.SystemByeRound)
+	}
+
+	participant.SystemByeRound = &roundNumber
+
+	if err := s.repo.UpdateParticipant(ctx, participant); err != nil {
+		return fmt.Errorf("failed to update participant: %w", err)
+	}
+
+	s.logger.Info().
+		Str("tournament_id", tournamentID.String()).
+		Str("participant_id", participantID.String()).
+		Int("round", roundNumber).
+		Msg("System bye recorded")
+
+	return nil
+}
+
+// RecordForfeit records a forfeit for a participant and checks auto-withdrawal threshold
+func (s *Service) RecordForfeit(ctx context.Context, tournamentID, participantID uuid.UUID, isConsecutive bool) (*Participant, bool, error) {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return nil, false, err
+	}
+
+	participant, err := s.repo.GetParticipant(ctx, participantID)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if participant.TournamentID != tournamentID {
+		return nil, false, fmt.Errorf("participant not in this tournament")
+	}
+
+	settings := tournament.ByeSettings
+	if settings == nil {
+		settings = DefaultByeSettings()
+	}
+
+	participant.ForfeitCount++
+	if isConsecutive {
+		participant.ConsecutiveForfeits++
+	} else {
+		participant.ConsecutiveForfeits = 1
+	}
+
+	autoWithdrawn := false
+
+	// Check auto-withdrawal thresholds
+	// AutoWithdrawAfter of 0 means disabled
+	if settings.Forfeit.AutoWithdrawAfter > 0 {
+		if settings.Forfeit.ConsecutiveOnly {
+			// Only count consecutive forfeits
+			if participant.ConsecutiveForfeits >= settings.Forfeit.AutoWithdrawAfter {
+				autoWithdrawn = true
+			}
+		} else {
+			// Count total forfeits
+			if participant.ForfeitCount >= settings.Forfeit.AutoWithdrawAfter {
+				autoWithdrawn = true
+			}
+		}
+	}
+
+	if autoWithdrawn {
+		currentRound := tournament.CurrentRound
+		participant.WithdrawnRound = &currentRound
+		var reason string
+		if settings.Forfeit.ConsecutiveOnly {
+			reason = fmt.Sprintf("Auto-withdrawn after %d consecutive forfeits", participant.ConsecutiveForfeits)
+		} else {
+			reason = fmt.Sprintf("Auto-withdrawn after %d total forfeits", participant.ForfeitCount)
+		}
+		participant.WithdrawalReason = &reason
+		participant.IsActive = false
+		participant.RegistrationStatus = "withdrawn"
+
+		s.logger.Info().
+			Str("tournament_id", tournamentID.String()).
+			Str("participant_id", participantID.String()).
+			Int("forfeit_count", participant.ForfeitCount).
+			Int("consecutive_forfeits", participant.ConsecutiveForfeits).
+			Msg("Participant auto-withdrawn due to forfeits")
+	}
+
+	if err := s.repo.UpdateParticipant(ctx, participant); err != nil {
+		return nil, false, fmt.Errorf("failed to update participant: %w", err)
+	}
+
+	s.logger.Info().
+		Str("tournament_id", tournamentID.String()).
+		Str("participant_id", participantID.String()).
+		Int("forfeit_count", participant.ForfeitCount).
+		Int("consecutive", participant.ConsecutiveForfeits).
+		Msg("Forfeit recorded")
+
+	return participant, autoWithdrawn, nil
+}
+
+// WithdrawParticipantWithDetails withdraws a participant with reason and round tracking
+func (s *Service) WithdrawParticipantWithDetails(ctx context.Context, tournamentID, participantID uuid.UUID, reason string) error {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return err
+	}
+
+	participant, err := s.repo.GetParticipant(ctx, participantID)
+	if err != nil {
+		return err
+	}
+
+	if participant.TournamentID != tournamentID {
+		return fmt.Errorf("participant not in this tournament")
+	}
+
+	currentRound := tournament.CurrentRound
+	if currentRound == 0 {
+		currentRound = 1 // Before first round
+	}
+
+	participant.WithdrawnRound = &currentRound
+	if reason != "" {
+		participant.WithdrawalReason = &reason
+	}
+	participant.IsActive = false
+	participant.RegistrationStatus = "withdrawn"
+
+	if err := s.repo.UpdateParticipant(ctx, participant); err != nil {
+		return fmt.Errorf("failed to update participant: %w", err)
+	}
+
+	s.logger.Info().
+		Str("tournament_id", tournamentID.String()).
+		Str("participant_id", participantID.String()).
+		Int("round", currentRound).
+		Str("reason", reason).
+		Msg("Participant withdrawn with details")
+
+	return nil
+}
+
+// AddLateEntry adds a late entry participant with proper missed round handling
+func (s *Service) AddLateEntry(ctx context.Context, tournamentID uuid.UUID, req *RegisterParticipantRequest, entryRound int) (*Participant, error) {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Tournament must be ongoing for late entry
+	if tournament.Status != StatusOngoing {
+		return nil, fmt.Errorf("late entry only allowed for ongoing tournaments")
+	}
+
+	settings := tournament.ByeSettings
+	if settings == nil {
+		settings = DefaultByeSettings()
+	}
+
+	// Check if late entry is allowed
+	if !settings.LateEntry.Allowed {
+		return nil, fmt.Errorf("late entry is not allowed in this tournament")
+	}
+
+	// Validate entry round is within valid range
+	if entryRound < 1 {
+		return nil, fmt.Errorf("invalid entry round: must be at least 1")
+	}
+	if entryRound > tournament.Rounds {
+		return nil, fmt.Errorf("invalid entry round: tournament only has %d rounds", tournament.Rounds)
+	}
+
+	// Check maximum entry round
+	if settings.LateEntry.MaxRound > 0 && entryRound > settings.LateEntry.MaxRound {
+		return nil, fmt.Errorf("late entry not allowed after round %d", settings.LateEntry.MaxRound)
+	}
+
+	// Check if player already registered
+	existing, _ := s.repo.GetParticipantByPlayerID(ctx, tournamentID, req.PlayerID)
+	if existing != nil {
+		return nil, fmt.Errorf("player already registered")
+	}
+
+	// Auto-fetch player rating if not provided
+	startingRating := req.StartingRating
+	if startingRating == 0 {
+		ratingType := s.getRatingType(tournament.TimeControlType)
+		fetchedRating, err := s.repo.GetPlayerRating(ctx, req.PlayerID, ratingType)
+		if err == nil && fetchedRating > 0 {
+			startingRating = fetchedRating
+		}
+	}
+
+	// Check rating limits for late entry
+	if settings.LateEntry.MinRating != nil && startingRating < *settings.LateEntry.MinRating {
+		return nil, fmt.Errorf("player rating %d is below minimum required rating %d", startingRating, *settings.LateEntry.MinRating)
+	}
+	if settings.LateEntry.MaxRating != nil && startingRating > *settings.LateEntry.MaxRating {
+		return nil, fmt.Errorf("player rating %d exceeds maximum allowed rating %d", startingRating, *settings.LateEntry.MaxRating)
+	}
+
+	// Calculate initial points for missed rounds
+	missedRounds := entryRound - 1
+	initialPoints := float64(missedRounds) * settings.LateEntry.MissedRoundPoints
+
+	participant := &Participant{
+		ID:                 uuid.New(),
+		TournamentID:       tournamentID,
+		SectionID:          req.SectionID,
+		PlayerID:           req.PlayerID,
+		RegistrationStatus: "registered",
+		RegisteredAt:       time.Now(),
+		StartingRating:     startingRating,
+		IsActive:           true,
+		PaymentStatus:      "pending",
+		LateEntryRound:     &entryRound,
+		Points:             initialPoints,
+	}
+
+	if err := s.repo.AddParticipant(ctx, participant); err != nil {
+		return nil, fmt.Errorf("failed to add late entry: %w", err)
+	}
+
+	s.logger.Info().
+		Str("tournament_id", tournamentID.String()).
+		Str("player_id", req.PlayerID.String()).
+		Int("entry_round", entryRound).
+		Int("missed_rounds", missedRounds).
+		Float64("initial_points", initialPoints).
+		Msg("Late entry added")
+
+	return participant, nil
+}
+
+// GetFIDEViolations returns any FIDE rule violations for the current tournament settings
+func (s *Service) GetFIDEViolations(ctx context.Context, tournamentID uuid.UUID) ([]FIDEViolation, error) {
+	tournament, err := s.repo.GetByID(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	if tournament.ByeSettings == nil {
+		return nil, nil // Default settings are FIDE compliant
+	}
+
+	return tournament.ByeSettings.ValidateFIDECompliance(tournament.Rounds), nil
+}
+
+// GetParticipantByeStatus returns detailed bye/withdrawal status for a participant
+func (s *Service) GetParticipantByeStatus(ctx context.Context, participantID uuid.UUID) (*ParticipantByeStatus, error) {
+	participant, err := s.repo.GetParticipant(ctx, participantID)
+	if err != nil {
+		return nil, err
+	}
+
+	tournament, err := s.repo.GetByID(ctx, participant.TournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	settings := tournament.ByeSettings
+	if settings == nil {
+		settings = DefaultByeSettings()
+	}
+
+	status := &ParticipantByeStatus{
+		ParticipantID:        participant.ID,
+		HalfPointByesUsed:    participant.HalfPointByesUsed,
+		ZeroPointByesUsed:    participant.ZeroPointByesUsed,
+		SystemByeRound:       participant.SystemByeRound,
+		ForfeitCount:         participant.ForfeitCount,
+		ConsecutiveForfeits:  participant.ConsecutiveForfeits,
+		LateEntryRound:       participant.LateEntryRound,
+		WithdrawnRound:       participant.WithdrawnRound,
+		WithdrawalReason:     participant.WithdrawalReason,
+		PendingByeRequests:   participant.ByeRequests,
+		MaxHalfPointByesLeft: settings.HalfPointBye.MaxPerPlayer - participant.HalfPointByesUsed,
+		CanRequestBye:        settings.HalfPointBye.Allowed && (settings.HalfPointBye.MaxPerPlayer == 0 || participant.HalfPointByesUsed < settings.HalfPointBye.MaxPerPlayer),
+	}
+
+	return status, nil
+}
+
+// ParticipantByeStatus contains detailed bye/withdrawal status for a participant
+type ParticipantByeStatus struct {
+	ParticipantID        uuid.UUID `json:"participantId"`
+	HalfPointByesUsed    int       `json:"halfPointByesUsed"`
+	ZeroPointByesUsed    int       `json:"zeroPointByesUsed"`
+	SystemByeRound       *int      `json:"systemByeRound,omitempty"`
+	ForfeitCount         int       `json:"forfeitCount"`
+	ConsecutiveForfeits  int       `json:"consecutiveForfeits"`
+	LateEntryRound       *int      `json:"lateEntryRound,omitempty"`
+	WithdrawnRound       *int      `json:"withdrawnRound,omitempty"`
+	WithdrawalReason     *string   `json:"withdrawalReason,omitempty"`
+	PendingByeRequests   []int     `json:"pendingByeRequests,omitempty"` // Rounds where bye requested
+	MaxHalfPointByesLeft int       `json:"maxHalfPointByesLeft"`
+	CanRequestBye        bool      `json:"canRequestBye"`
+}
