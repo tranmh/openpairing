@@ -14,6 +14,7 @@ import (
 	"github.com/openpairing/openpairing/internal/auth"
 	"github.com/openpairing/openpairing/internal/config"
 	"github.com/openpairing/openpairing/internal/database"
+	"github.com/openpairing/openpairing/internal/email"
 	"github.com/openpairing/openpairing/internal/export"
 	"github.com/openpairing/openpairing/internal/federation"
 	"github.com/openpairing/openpairing/internal/federation/dsb"
@@ -55,8 +56,21 @@ func main() {
 	}
 	defer db.Close()
 
+	// Initialize email service
+	emailConfig := &email.Config{
+		SMTPHost:     cfg.Email.SMTPHost,
+		SMTPPort:     cfg.Email.SMTPPort,
+		SMTPUsername: cfg.Email.SMTPUsername,
+		SMTPPassword: cfg.Email.SMTPPassword,
+		FromEmail:    cfg.Email.FromEmail,
+		FromName:     cfg.Email.FromName,
+		UseTLS:       cfg.Email.UseTLS,
+		SkipVerify:   cfg.Email.SkipVerify,
+	}
+	emailService := email.NewService(emailConfig, log.Logger)
+
 	// Initialize services
-	authService := auth.NewService(db.Pool, &cfg.JWT)
+	authService := auth.NewService(db.Pool, &cfg.JWT, emailService, cfg.App.BaseURL)
 	authHandler := auth.NewHandler(authService)
 	authMiddleware := auth.NewMiddleware(auth.NewJWTService(&cfg.JWT))
 

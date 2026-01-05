@@ -213,9 +213,8 @@ func (h *Handler) ForgotPassword(c *gin.Context) {
 	}
 
 	// Always return success to prevent email enumeration
+	// Email is sent within RequestPasswordReset if user exists
 	_, _ = h.service.RequestPasswordReset(c.Request.Context(), req.Email)
-
-	// TODO: Send email with reset token
 
 	response.Success(c, http.StatusOK, gin.H{
 		"message": "If an account with that email exists, a password reset link has been sent",

@@ -58,19 +58,28 @@ type TokenPair struct {
 	ExpiresAt    time.Time `json:"expiresAt"`
 }
 
+// EmailSender interface for sending emails
+type EmailSender interface {
+	SendPasswordReset(ctx context.Context, to, recipientName, resetLink string) error
+}
+
 // Service handles authentication operations
 type Service struct {
-	db         *pgxpool.Pool
-	jwt        *JWTService
-	bcryptCost int
+	db           *pgxpool.Pool
+	jwt          *JWTService
+	bcryptCost   int
+	emailService EmailSender
+	appBaseURL   string
 }
 
 // NewService creates a new auth service
-func NewService(db *pgxpool.Pool, cfg *config.JWTConfig) *Service {
+func NewService(db *pgxpool.Pool, cfg *config.JWTConfig, emailService EmailSender, appBaseURL string) *Service {
 	return &Service{
-		db:         db,
-		jwt:        NewJWTService(cfg),
-		bcryptCost: 12,
+		db:           db,
+		jwt:          NewJWTService(cfg),
+		bcryptCost:   12,
+		emailService: emailService,
+		appBaseURL:   appBaseURL,
 	}
 }
 
@@ -259,11 +268,17 @@ func (s *Service) GetUserByID(ctx context.Context, userID string) (*User, error)
 	return &user, nil
 }
 
-// RequestPasswordReset creates a password reset token
+// RequestPasswordReset creates a password reset token and sends email
 func (s *Service) RequestPasswordReset(ctx context.Context, email string) (string, error) {
-	// Check if user exists
+	// Check if user exists and get user info
 	var userID string
-	err := s.db.QueryRow(ctx, "SELECT id FROM users WHERE email = $1", email).Scan(&userID)
+	var firstName, lastName string
+	err := s.db.QueryRow(ctx, `
+		SELECT u.id, COALESCE(p.first_name, ''), COALESCE(p.last_name, '')
+		FROM users u
+		LEFT JOIN players p ON p.user_id = u.id
+		WHERE u.email = $1
+	`, email).Scan(&userID, &firstName, &lastName)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Don't reveal if email exists
@@ -287,6 +302,21 @@ func (s *Service) RequestPasswordReset(ctx context.Context, email string) (strin
 	`, userID, tokenHash, expiresAt)
 	if err != nil {
 		return "", err
+	}
+
+	// Send password reset email
+	if s.emailService != nil {
+		recipientName := firstName
+		if recipientName == "" {
+			recipientName = "User"
+		}
+		resetLink := s.appBaseURL + "/reset-password?token=" + token
+		if err := s.emailService.SendPasswordReset(ctx, email, recipientName, resetLink); err != nil {
+			log.Error().Err(err).Str("email", email).Msg("Failed to send password reset email")
+			// Don't return error to user - token is still created
+		} else {
+			log.Info().Str("email", email).Msg("Password reset email sent")
+		}
 	}
 
 	return token, nil

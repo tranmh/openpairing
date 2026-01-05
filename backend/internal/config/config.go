@@ -17,6 +17,30 @@ type Config struct {
 	Federation  FederationConfig
 	Pairing     PairingConfig
 	RateLimit   RateLimitConfig
+	Email       EmailConfig
+	App         AppConfig
+	WebPush     WebPushConfig
+}
+
+type EmailConfig struct {
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	FromEmail    string
+	FromName     string
+	UseTLS       bool
+	SkipVerify   bool
+}
+
+type AppConfig struct {
+	BaseURL string
+}
+
+type WebPushConfig struct {
+	VAPIDPublicKey  string
+	VAPIDPrivateKey string
+	VAPIDSubject    string
 }
 
 type ServerConfig struct {
@@ -148,6 +172,24 @@ func Load() *Config {
 		},
 		RateLimit: RateLimitConfig{
 			Enabled: getBoolEnv("RATE_LIMIT_ENABLED", true),
+		},
+		Email: EmailConfig{
+			SMTPHost:     getEnv("SMTP_HOST", "localhost"),
+			SMTPPort:     getIntEnv("SMTP_PORT", 1025),
+			SMTPUsername: getEnv("SMTP_USERNAME", ""),
+			SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+			FromEmail:    getEnv("SMTP_FROM_EMAIL", "noreply@openpairing.com"),
+			FromName:     getEnv("SMTP_FROM_NAME", "OpenPairing"),
+			UseTLS:       getBoolEnv("SMTP_USE_TLS", false),
+			SkipVerify:   getBoolEnv("SMTP_SKIP_VERIFY", false),
+		},
+		App: AppConfig{
+			BaseURL: getEnv("APP_BASE_URL", "http://localhost:3000"),
+		},
+		WebPush: WebPushConfig{
+			VAPIDPublicKey:  getEnv("VAPID_PUBLIC_KEY", ""),
+			VAPIDPrivateKey: getEnv("VAPID_PRIVATE_KEY", ""),
+			VAPIDSubject:    getEnv("VAPID_SUBJECT", "mailto:admin@openpairing.com"),
 		},
 	}
 }
