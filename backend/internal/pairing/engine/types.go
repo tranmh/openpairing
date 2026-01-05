@@ -31,8 +31,9 @@ type Player struct {
 	IsActive       bool
 	ByeCount       int
 	FloatStatus    FloatStatus
-	TeamID         int // For team tournaments
-	BoardNumber    int // For team tournaments
+	TeamID         int        // For team tournaments
+	BoardNumber    int        // For team tournaments
+	BirthDate      *time.Time // For age calculations (WAM U12)
 }
 
 // Color represents piece color

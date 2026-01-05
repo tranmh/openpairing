@@ -189,7 +189,7 @@ export interface Tournament {
   mode: 'otb' | 'online' | 'hybrid';
   timeControl?: string;
   timeControlType?: 'standard' | 'rapid' | 'blitz';
-  pairingEngine: 'javafo' | 'bbp';
+  pairingEngine: 'javafo' | 'bbp' | 'wam';
   pairingSystem: 'dutch' | 'burstein' | 'dubov';
   startDate: string;
   endDate?: string;
@@ -317,6 +317,47 @@ export const tournamentsApi = {
 
   enterResult: (tournamentId: string, gameId: string, result: string) =>
     api.put<Game>(`/tournaments/${tournamentId}/games/${gameId}/result`, { result }),
+};
+
+// WAM (Wiener Arbeiter-Mannschaftsmeisterschaft) API
+import type {
+  WamParticipant,
+  GroupProposal,
+  ConfirmGroupsRequest,
+  ConfirmGroupsResponse,
+  WamTournamentStatus,
+  UpdateJokerRequest,
+  UpdateJokerResponse,
+  JokerValue,
+} from '@/types/wam';
+
+export const wamApi = {
+  // Get WAM tournament status and groups
+  getStatus: (tournamentId: string) =>
+    api.get<WamTournamentStatus>(`/tournaments/${tournamentId}/wam/status`),
+
+  // Get WAM participants with joker and U12 information
+  getParticipants: (tournamentId: string) =>
+    api.get<{ participants: WamParticipant[] }>(`/tournaments/${tournamentId}/wam/participants`),
+
+  // Set joker points for a participant
+  setJokerPoints: (tournamentId: string, participantId: string, jokerPoints: JokerValue) =>
+    api.put<UpdateJokerResponse>(
+      `/tournaments/${tournamentId}/wam/participants/${participantId}/joker`,
+      { jokerPoints } as UpdateJokerRequest
+    ),
+
+  // Get group proposal (calculates optimal groups)
+  proposeGroups: (tournamentId: string) =>
+    api.get<GroupProposal>(`/tournaments/${tournamentId}/wam/groups/propose`),
+
+  // Confirm group proposal (creates groups)
+  confirmGroups: (tournamentId: string, request: ConfirmGroupsRequest) =>
+    api.post<ConfirmGroupsResponse>(`/tournaments/${tournamentId}/wam/groups/confirm`, request),
+
+  // Delete all groups (reset)
+  deleteGroups: (tournamentId: string) =>
+    api.delete(`/tournaments/${tournamentId}/wam/groups`),
 };
 
 export default api;

@@ -35,7 +35,12 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 		wam.GET("/config", h.GetConfig)
 		wam.GET("/status", h.GetStatus)
 
+		// Joker
+		wam.PUT("/participants/:participantId/joker", h.SetJokerPoints)
+
 		// Groups
+		wam.GET("/groups/propose", h.ProposeGroups)
+		wam.POST("/groups/confirm", h.ConfirmGroups)
 		wam.POST("/groups/assign", h.AssignGroups)
 		wam.GET("/groups", h.ListGroups)
 		wam.GET("/groups/:groupId", h.GetGroup)
@@ -595,4 +600,111 @@ func (h *Handler) ExportQualifications(c *gin.Context) {
 		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=qualifications_%s.json", qualifications.Season))
 		c.Writer.Write(data)
 	}
+}
+
+// SetJokerPoints sets joker points for a participant
+// @Summary Set joker points
+// @Tags wam
+// @Accept json
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param participantId path string true "Participant ID"
+// @Param request body SetJokerRequest true "Joker points"
+// @Success 200
+// @Router /tournaments/{id}/wam/participants/{participantId}/joker [put]
+func (h *Handler) SetJokerPoints(c *gin.Context) {
+	tournamentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	participantID, err := uuid.Parse(c.Param("participantId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid participant ID"})
+		return
+	}
+
+	var req SetJokerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.service.SetJokerPoints(c.Request.Context(), tournamentID, participantID, req.JokerPoints); err != nil {
+		status := http.StatusInternalServerError
+		if err == ErrInvalidPhase {
+			status = http.StatusConflict
+		} else if err == ErrMemberNotFound {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "joker points set"})
+}
+
+// ProposeGroups generates a group proposal for review
+// @Summary Propose groups
+// @Tags wam
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Success 200 {object} GroupProposal
+// @Router /tournaments/{id}/wam/groups/propose [get]
+func (h *Handler) ProposeGroups(c *gin.Context) {
+	tournamentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	proposal, err := h.service.ProposeGroups(c.Request.Context(), tournamentID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err == ErrInvalidPhase {
+			status = http.StatusConflict
+		} else if err == ErrNoParticipants {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, proposal)
+}
+
+// ConfirmGroups confirms a proposed group configuration
+// @Summary Confirm groups
+// @Tags wam
+// @Accept json
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param request body ConfirmGroupsRequest true "Confirmed groups"
+// @Success 200 {object} AssignGroupsResponse
+// @Router /tournaments/{id}/wam/groups/confirm [post]
+func (h *Handler) ConfirmGroups(c *gin.Context) {
+	tournamentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	var req ConfirmGroupsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	response, err := h.service.ConfirmGroups(c.Request.Context(), tournamentID, &req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err == ErrInvalidPhase {
+			status = http.StatusConflict
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
 }

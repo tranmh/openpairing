@@ -41,14 +41,16 @@ const (
 
 // ConfigureWAMRequest is the request to configure WAM tournament settings
 type ConfigureWAMRequest struct {
-	GroupSize        int      `json:"groupSize" binding:"required,min=3,max=10"`
-	AssignmentMethod string   `json:"assignmentMethod" binding:"required,oneof=sequential serpentine random manual"`
-	EnablePlayoffs   bool     `json:"enablePlayoffs"`
-	PlayoffsTopN     int      `json:"playoffsTopN" binding:"omitempty,min=1,max=4"`
-	ThirdPlaceMatch  bool     `json:"thirdPlaceMatch"`
-	YouthAgeLimit    int      `json:"youthAgeLimit" binding:"omitempty,min=0,max=100"`
-	Tiebreaks        []string `json:"tiebreaks,omitempty"`
-	Season           string   `json:"season,omitempty"`
+	GroupSize         int      `json:"groupSize" binding:"required,min=3,max=10"`
+	DefaultGroupSize  int      `json:"defaultGroupSize" binding:"omitempty,min=3,max=10"`
+	AllowedGroupSizes []int    `json:"allowedGroupSizes,omitempty"` // e.g., [4, 6]
+	AssignmentMethod  string   `json:"assignmentMethod" binding:"required,oneof=sequential serpentine random manual"`
+	EnablePlayoffs    bool     `json:"enablePlayoffs"`
+	PlayoffsTopN      int      `json:"playoffsTopN" binding:"omitempty,min=1,max=4"`
+	ThirdPlaceMatch   bool     `json:"thirdPlaceMatch"`
+	YouthAgeLimit     int      `json:"youthAgeLimit" binding:"omitempty,min=0,max=100"`
+	Tiebreaks         []string `json:"tiebreaks,omitempty"`
+	Season            string   `json:"season,omitempty"`
 }
 
 // AssignGroupsRequest is the request for automatic group assignment
@@ -149,6 +151,9 @@ type TournamentParticipant struct {
 	PlayerID      uuid.UUID  `json:"playerId"`
 	Name          string     `json:"name"`
 	Rating        int        `json:"rating"`
+	JokerPoints   int        `json:"jokerPoints"`   // 0, 50, 100, or 150
+	IsU12         bool       `json:"isU12"`         // Player is under youth age limit
+	Age           *int       `json:"age,omitempty"` // Calculated age
 	ClubID        *uuid.UUID `json:"clubId,omitempty"`
 	ClubName      *string    `json:"clubName,omitempty"`
 	BirthDate     *time.Time `json:"birthDate,omitempty"`
@@ -165,4 +170,45 @@ type Game struct {
 	BlackScore         *float64   `json:"blackScore,omitempty"`
 	Result             *string    `json:"result,omitempty"`
 	Status             string     `json:"status"`
+}
+
+// SetJokerRequest is the request to set joker points for a participant
+type SetJokerRequest struct {
+	JokerPoints int `json:"jokerPoints" binding:"oneof=0 50 100 150"`
+}
+
+// GroupProposal represents a proposed group configuration
+type GroupProposal struct {
+	Groups       []ProposedGroup    `json:"groups"`
+	TotalPlayers int                `json:"totalPlayers"`
+	Warnings     []string           `json:"warnings,omitempty"`
+	U12Proposals []U12GroupProposal `json:"u12Proposals,omitempty"`
+}
+
+// ProposedGroup represents a single proposed group
+type ProposedGroup struct {
+	Name       string                  `json:"name"`       // "A", "B", etc.
+	TargetSize int                     `json:"targetSize"` // 4 or 6
+	Players    []TournamentParticipant `json:"players"`
+	IsU12Group bool                    `json:"isU12Group"`
+}
+
+// U12GroupProposal represents a proposal for a U12-only group
+type U12GroupProposal struct {
+	GroupName        string                  `json:"groupName"`
+	Players          []TournamentParticipant `json:"players"`
+	Reason           string                  `json:"reason"`
+	RequiresApproval bool                    `json:"requiresApproval"`
+}
+
+// ConfirmGroupsRequest is the request to confirm proposed groups
+type ConfirmGroupsRequest struct {
+	Proposals []ConfirmedGroup `json:"proposals" binding:"required"`
+}
+
+// ConfirmedGroup represents a confirmed group configuration
+type ConfirmedGroup struct {
+	GroupName      string      `json:"groupName"`
+	TargetSize     int         `json:"targetSize"`
+	ParticipantIDs []uuid.UUID `json:"participantIds"`
 }

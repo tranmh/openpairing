@@ -3,6 +3,7 @@ package wam
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/openpairing/openpairing/internal/pairing/engine"
@@ -259,6 +260,25 @@ func (m *MockRepository) DeleteQualifications(ctx context.Context, tournamentID 
 	}
 	m.quals = remaining
 	return nil
+}
+
+func (m *MockRepository) SetJokerPoints(ctx context.Context, tournamentID, participantID uuid.UUID, jokerPoints int) error {
+	for i := range m.participants {
+		if m.participants[i].ParticipantID == participantID {
+			m.participants[i].JokerPoints = jokerPoints
+			return nil
+		}
+	}
+	return ErrMemberNotFound
+}
+
+func (m *MockRepository) GetJokerPoints(ctx context.Context, tournamentID, participantID uuid.UUID) (int, error) {
+	for _, p := range m.participants {
+		if p.ParticipantID == participantID {
+			return p.JokerPoints, nil
+		}
+	}
+	return 0, ErrMemberNotFound
 }
 
 // Test cases
@@ -759,4 +779,658 @@ func TestServiceGetStatusNotConfigured(t *testing.T) {
 	if status.Phase != engine.WAMPhaseSetup {
 		t.Errorf("Expected Setup phase for unconfigured tournament, got %s", status.Phase)
 	}
+}
+
+// ==================== NEW TESTS FOR JOKER, VARIABLE GROUPS, U12 ====================
+
+func TestServiceSetJokerPointsValid(t *testing.T) {
+	repo := NewMockRepository()
+	logger := zerolog.Nop()
+	svc := NewService(repo, logger)
+	ctx := context.Background()
+	tournamentID := uuid.New()
+	participantID := uuid.New()
+
+	repo.config = &WAMConfig{
+		TournamentID: tournamentID,
+		CurrentPhase: engine.WAMPhaseSetup,
+	}
+
+	repo.participants = []TournamentParticipant{
+		{ParticipantID: participantID, Name: "Test Player", Rating: 1500},
+	}
+
+	// Test valid joker values
+	validJokers := []int{0, 50, 100, 150}
+	for _, joker := range validJokers {
+		err := svc.SetJokerPoints(ctx, tournamentID, participantID, joker)
+		if err != nil {
+			t.Errorf("SetJokerPoints(%d) failed: %v", joker, err)
+		}
+
+		// Verify it was set
+		points, err := repo.GetJokerPoints(ctx, tournamentID, participantID)
+		if err != nil {
+			t.Fatalf("GetJokerPoints failed: %v", err)
+		}
+		if points != joker {
+			t.Errorf("Expected joker points %d, got %d", joker, points)
+		}
+	}
+}
+
+func TestServiceSetJokerPointsInvalidValue(t *testing.T) {
+	repo := NewMockRepository()
+	logger := zerolog.Nop()
+	svc := NewService(repo, logger)
+	ctx := context.Background()
+	tournamentID := uuid.New()
+	participantID := uuid.New()
+
+	repo.config = &WAMConfig{
+		TournamentID: tournamentID,
+		CurrentPhase: engine.WAMPhaseSetup,
+	}
+
+	repo.participants = []TournamentParticipant{
+		{ParticipantID: participantID, Name: "Test Player", Rating: 1500},
+	}
+
+	// Test invalid joker values
+	invalidJokers := []int{25, 75, 125, 200, -50}
+	for _, joker := range invalidJokers {
+		err := svc.SetJokerPoints(ctx, tournamentID, participantID, joker)
+		if err == nil {
+			t.Errorf("SetJokerPoints(%d) should fail for invalid value", joker)
+		}
+	}
+}
+
+func TestServiceSetJokerPointsWrongPhase(t *testing.T) {
+	repo := NewMockRepository()
+	logger := zerolog.Nop()
+	svc := NewService(repo, logger)
+	ctx := context.Background()
+	tournamentID := uuid.New()
+	participantID := uuid.New()
+
+	repo.config = &WAMConfig{
+		TournamentID: tournamentID,
+		CurrentPhase: engine.WAMPhaseGroup, // Wrong phase!
+	}
+
+	repo.participants = []TournamentParticipant{
+		{ParticipantID: participantID, Name: "Test Player", Rating: 1500},
+	}
+
+	err := svc.SetJokerPoints(ctx, tournamentID, participantID, 50)
+	if err != ErrInvalidPhase {
+		t.Errorf("Expected ErrInvalidPhase, got %v", err)
+	}
+}
+
+func TestServiceProposeGroupsWithJokerAffectsSorting(t *testing.T) {
+	repo := NewMockRepository()
+	logger := zerolog.Nop()
+	svc := NewService(repo, logger)
+	ctx := context.Background()
+	tournamentID := uuid.New()
+
+	repo.config = &WAMConfig{
+		TournamentID:      tournamentID,
+		DefaultGroupSize:  4,
+		AllowedGroupSizes: []int{4, 6},
+		CurrentPhase:      engine.WAMPhaseSetup,
+		YouthAgeLimit:     12,
+	}
+
+	// Create 8 participants
+	// Player B has lower rating but with joker should be higher
+	repo.participants = []TournamentParticipant{
+		{ParticipantID: uuid.New(), Name: "Player A", Rating: 1500, JokerPoints: 0},    // Effective: 1500
+		{ParticipantID: uuid.New(), Name: "Player B", Rating: 1400, JokerPoints: 150},  // Effective: 1550 <- should be first!
+		{ParticipantID: uuid.New(), Name: "Player C", Rating: 1480, JokerPoints: 0},    // Effective: 1480
+		{ParticipantID: uuid.New(), Name: "Player D", Rating: 1350, JokerPoints: 100},  // Effective: 1450
+		{ParticipantID: uuid.New(), Name: "Player E", Rating: 1440, JokerPoints: 0},    // Effective: 1440
+		{ParticipantID: uuid.New(), Name: "Player F", Rating: 1280, JokerPoints: 150},  // Effective: 1430
+		{ParticipantID: uuid.New(), Name: "Player G", Rating: 1420, JokerPoints: 0},    // Effective: 1420
+		{ParticipantID: uuid.New(), Name: "Player H", Rating: 1300, JokerPoints: 50},   // Effective: 1350
+	}
+
+	proposal, err := svc.ProposeGroups(ctx, tournamentID)
+	if err != nil {
+		t.Fatalf("ProposeGroups failed: %v", err)
+	}
+
+	if len(proposal.Groups) != 2 {
+		t.Fatalf("Expected 2 groups, got %d", len(proposal.Groups))
+	}
+
+	// BUG TEST: With serpentine, Player B (effective 1550) should be in Group A first
+	// Expected order by effective rating: B(1550), A(1500), C(1480), D(1450), E(1440), F(1430), G(1420), H(1350)
+	// Serpentine for 2 groups: B->A, A->B, C->B, D->A, E->A, F->B, G->B, H->A
+	// Group A: B, D, E, H
+	// Group B: A, C, F, G
+
+	groupAPlayers := proposal.Groups[0].Players
+	if len(groupAPlayers) == 0 {
+		t.Fatal("Group A has no players")
+	}
+
+	// The first player in Group A should be Player B (with effective rating 1550)
+	if groupAPlayers[0].Name != "Player B" {
+		t.Errorf("BUG: Joker points not affecting sort order! Expected Player B first in Group A, got %s",
+			groupAPlayers[0].Name)
+		t.Logf("Group A players: %v", func() []string {
+			names := make([]string, len(groupAPlayers))
+			for i, p := range groupAPlayers {
+				names[i] = p.Name
+			}
+			return names
+		}())
+	}
+}
+
+func TestServiceProposeGroupsU12Identification(t *testing.T) {
+	repo := NewMockRepository()
+	logger := zerolog.Nop()
+	svc := NewService(repo, logger)
+	ctx := context.Background()
+	tournamentID := uuid.New()
+
+	repo.config = &WAMConfig{
+		TournamentID:      tournamentID,
+		DefaultGroupSize:  4,
+		AllowedGroupSizes: []int{4, 6},
+		CurrentPhase:      engine.WAMPhaseSetup,
+		YouthAgeLimit:     12, // Under 12
+	}
+
+	now := time.Now()
+	age10 := now.AddDate(-10, 0, 0)
+	age11 := now.AddDate(-11, 0, 0)
+	age12 := now.AddDate(-12, -1, 0) // Just turned 12
+	age15 := now.AddDate(-15, 0, 0)
+
+	repo.participants = []TournamentParticipant{
+		{ParticipantID: uuid.New(), Name: "Young 10", Rating: 1200, BirthDate: &age10},
+		{ParticipantID: uuid.New(), Name: "Young 11", Rating: 1180, BirthDate: &age11},
+		{ParticipantID: uuid.New(), Name: "Just 12", Rating: 1300, BirthDate: &age12},   // NOT U12 anymore
+		{ParticipantID: uuid.New(), Name: "Teen 15", Rating: 1400, BirthDate: &age15},
+		{ParticipantID: uuid.New(), Name: "No DOB", Rating: 1350},                         // No birthdate
+	}
+
+	proposal, err := svc.ProposeGroups(ctx, tournamentID)
+	if err != nil {
+		t.Fatalf("ProposeGroups failed: %v", err)
+	}
+
+	// Count U12 players in proposal
+	u12Count := 0
+	for _, group := range proposal.Groups {
+		for _, player := range group.Players {
+			if player.IsU12 {
+				u12Count++
+				// Verify age
+				if player.Age != nil && *player.Age >= 12 {
+					t.Errorf("BUG: Player %s marked as U12 but age is %d", player.Name, *player.Age)
+				}
+			}
+		}
+	}
+
+	// Should have 2 U12 players (Young 10 and Young 11)
+	if u12Count != 2 {
+		t.Errorf("Expected 2 U12 players, got %d", u12Count)
+	}
+}
+
+func TestServiceProposeGroupsWithVariableGroupSizes(t *testing.T) {
+	repo := NewMockRepository()
+	logger := zerolog.Nop()
+	svc := NewService(repo, logger)
+	ctx := context.Background()
+	tournamentID := uuid.New()
+
+	repo.config = &WAMConfig{
+		TournamentID:      tournamentID,
+		DefaultGroupSize:  4,
+		AllowedGroupSizes: []int{4, 6},
+		CurrentPhase:      engine.WAMPhaseSetup,
+	}
+
+	// 10 players: can be 2x4 + 1x2, or should propose 1x4 + 1x6
+	for i := 0; i < 10; i++ {
+		repo.participants = append(repo.participants, TournamentParticipant{
+			ParticipantID: uuid.New(),
+			Name:          "Player " + string(rune('A'+i)),
+			Rating:        2000 - i*10,
+		})
+	}
+
+	proposal, err := svc.ProposeGroups(ctx, tournamentID)
+	if err != nil {
+		t.Fatalf("ProposeGroups failed: %v", err)
+	}
+
+	// Count total players
+	totalPlayers := 0
+	for _, g := range proposal.Groups {
+		totalPlayers += len(g.Players)
+	}
+
+	if totalPlayers != 10 {
+		t.Errorf("Expected 10 total players in groups, got %d", totalPlayers)
+	}
+
+	// Check that all players were assigned exactly once
+	assignedIDs := make(map[uuid.UUID]int)
+	for _, g := range proposal.Groups {
+		for _, p := range g.Players {
+			if p.ParticipantID == uuid.Nil {
+				t.Errorf("BUG: Player %s has nil ParticipantID in proposal", p.Name)
+			}
+			assignedIDs[p.ParticipantID]++
+		}
+	}
+
+	for pid, count := range assignedIDs {
+		if count > 1 {
+			t.Errorf("BUG: Participant %s assigned %d times", pid, count)
+		}
+	}
+
+	if len(assignedIDs) != 10 {
+		t.Errorf("BUG: Expected 10 unique participants assigned, got %d", len(assignedIDs))
+	}
+}
+
+func TestServiceProposeGroupsU12ProposalWithDuplicateNames(t *testing.T) {
+	// This test exposes BUG: U12 proposal matching uses name only,
+	// which fails when multiple players have the same name
+	repo := NewMockRepository()
+	logger := zerolog.Nop()
+	svc := NewService(repo, logger)
+	ctx := context.Background()
+	tournamentID := uuid.New()
+
+	now := time.Now()
+	age10 := now.AddDate(-10, 0, 0)
+
+	repo.config = &WAMConfig{
+		TournamentID:      tournamentID,
+		DefaultGroupSize:  4,
+		AllowedGroupSizes: []int{4, 6},
+		CurrentPhase:      engine.WAMPhaseSetup,
+		YouthAgeLimit:     12,
+	}
+
+	// Create 14 participants with 7 U12 players
+	// Many have the same name "Mueller" which is common in Germany
+	for i := 0; i < 14; i++ {
+		participant := TournamentParticipant{
+			ParticipantID: uuid.New(),
+			Name:          "Mueller", // All same name!
+			Rating:        2000 - i*10,
+		}
+		// First 7 are U12
+		if i < 7 {
+			participant.BirthDate = &age10
+		}
+		repo.participants = append(repo.participants, participant)
+	}
+
+	proposal, err := svc.ProposeGroups(ctx, tournamentID)
+	if err != nil {
+		t.Fatalf("ProposeGroups failed: %v", err)
+	}
+
+	// If there's a U12 proposal, check for duplicate participants
+	if len(proposal.U12Proposals) > 0 {
+		u12Proposal := proposal.U12Proposals[0]
+
+		// Check that all U12 proposal players have unique participant IDs
+		seenIDs := make(map[uuid.UUID]bool)
+		for _, player := range u12Proposal.Players {
+			if player.ParticipantID == uuid.Nil {
+				t.Errorf("BUG: U12 proposal player has nil ParticipantID (name: %s)", player.Name)
+				continue
+			}
+			if seenIDs[player.ParticipantID] {
+				t.Errorf("BUG: Duplicate ParticipantID in U12 proposal due to name matching: %s", player.ParticipantID)
+			}
+			seenIDs[player.ParticipantID] = true
+		}
+	}
+}
+
+func TestServiceConfirmGroupsCreatesCorrectGroups(t *testing.T) {
+	repo := NewMockRepository()
+	logger := zerolog.Nop()
+	svc := NewService(repo, logger)
+	ctx := context.Background()
+	tournamentID := uuid.New()
+
+	repo.config = &WAMConfig{
+		TournamentID:      tournamentID,
+		DefaultGroupSize:  4,
+		AllowedGroupSizes: []int{4, 6},
+		CurrentPhase:      engine.WAMPhaseSetup,
+	}
+
+	// Create 8 participants
+	participantIDs := make([]uuid.UUID, 8)
+	for i := 0; i < 8; i++ {
+		participantIDs[i] = uuid.New()
+		repo.participants = append(repo.participants, TournamentParticipant{
+			ParticipantID: participantIDs[i],
+			Name:          "Player " + string(rune('A'+i)),
+			Rating:        2000 - i*10,
+			JokerPoints:   50 * (i % 3), // 0, 50, 100, 0, 50, 100, 0, 50
+		})
+	}
+
+	req := &ConfirmGroupsRequest{
+		Proposals: []ConfirmedGroup{
+			{
+				GroupName:      "A",
+				TargetSize:     4,
+				ParticipantIDs: participantIDs[:4],
+			},
+			{
+				GroupName:      "B",
+				TargetSize:     4,
+				ParticipantIDs: participantIDs[4:],
+			},
+		},
+	}
+
+	resp, err := svc.ConfirmGroups(ctx, tournamentID, req)
+	if err != nil {
+		t.Fatalf("ConfirmGroups failed: %v", err)
+	}
+
+	if len(resp.Groups) != 2 {
+		t.Fatalf("Expected 2 groups, got %d", len(resp.Groups))
+	}
+
+	// Verify joker points were stored correctly in group members
+	for _, g := range resp.Groups {
+		for _, p := range g.Players {
+			// Find original participant
+			var originalJoker int
+			for _, orig := range repo.participants {
+				if orig.ParticipantID == p.ParticipantID {
+					originalJoker = orig.JokerPoints
+					break
+				}
+			}
+
+			if p.JokerPoints != originalJoker {
+				t.Errorf("BUG: Player %s joker points not preserved: expected %d, got %d",
+					p.Name, originalJoker, p.JokerPoints)
+			}
+
+			expectedEffective := p.Rating + p.JokerPoints
+			if p.EffectiveRating != expectedEffective {
+				t.Errorf("BUG: Player %s effective rating wrong: expected %d (rating %d + joker %d), got %d",
+					p.Name, expectedEffective, p.Rating, p.JokerPoints, p.EffectiveRating)
+			}
+		}
+	}
+}
+
+func TestServiceConfirmGroupsValidatesParticipants(t *testing.T) {
+	repo := NewMockRepository()
+	logger := zerolog.Nop()
+	svc := NewService(repo, logger)
+	ctx := context.Background()
+	tournamentID := uuid.New()
+
+	repo.config = &WAMConfig{
+		TournamentID: tournamentID,
+		CurrentPhase: engine.WAMPhaseSetup,
+	}
+
+	// Create only 2 participants
+	participantIDs := make([]uuid.UUID, 2)
+	for i := 0; i < 2; i++ {
+		participantIDs[i] = uuid.New()
+		repo.participants = append(repo.participants, TournamentParticipant{
+			ParticipantID: participantIDs[i],
+			Name:          "Player " + string(rune('A'+i)),
+		})
+	}
+
+	// Try to confirm with a non-existent participant
+	fakeID := uuid.New()
+	req := &ConfirmGroupsRequest{
+		Proposals: []ConfirmedGroup{
+			{
+				GroupName:      "A",
+				TargetSize:     4,
+				ParticipantIDs: []uuid.UUID{participantIDs[0], participantIDs[1], fakeID},
+			},
+		},
+	}
+
+	resp, err := svc.ConfirmGroups(ctx, tournamentID, req)
+	if err != nil {
+		t.Fatalf("ConfirmGroups failed: %v", err)
+	}
+
+	// Should have a warning about missing participant
+	foundWarning := false
+	for _, w := range resp.Warnings {
+		if containsSubstr(w, "not found") {
+			foundWarning = true
+			break
+		}
+	}
+
+	if !foundWarning {
+		t.Error("Expected warning about non-existent participant")
+	}
+}
+
+func TestServiceConfirmGroupsSetsCorrectRounds(t *testing.T) {
+	repo := NewMockRepository()
+	logger := zerolog.Nop()
+	svc := NewService(repo, logger)
+	ctx := context.Background()
+	tournamentID := uuid.New()
+
+	repo.config = &WAMConfig{
+		TournamentID:      tournamentID,
+		DefaultGroupSize:  4,
+		AllowedGroupSizes: []int{4, 6},
+		CurrentPhase:      engine.WAMPhaseSetup,
+	}
+
+	// Create participants
+	var participantIDs4 []uuid.UUID
+	var participantIDs6 []uuid.UUID
+
+	for i := 0; i < 10; i++ {
+		pid := uuid.New()
+		repo.participants = append(repo.participants, TournamentParticipant{
+			ParticipantID: pid,
+			Name:          "Player " + string(rune('A'+i)),
+			Rating:        2000 - i*10,
+		})
+		if i < 4 {
+			participantIDs4 = append(participantIDs4, pid)
+		} else {
+			participantIDs6 = append(participantIDs6, pid)
+		}
+	}
+
+	req := &ConfirmGroupsRequest{
+		Proposals: []ConfirmedGroup{
+			{GroupName: "A", TargetSize: 4, ParticipantIDs: participantIDs4}, // 4 players = 3 rounds
+			{GroupName: "B", TargetSize: 6, ParticipantIDs: participantIDs6}, // 6 players = 5 rounds
+		},
+	}
+
+	resp, err := svc.ConfirmGroups(ctx, tournamentID, req)
+	if err != nil {
+		t.Fatalf("ConfirmGroups failed: %v", err)
+	}
+
+	if len(resp.Groups) != 2 {
+		t.Fatalf("Expected 2 groups, got %d", len(resp.Groups))
+	}
+
+	// Check round counts
+	for _, g := range resp.Groups {
+		expectedRounds := engine.GetTotalGroupRounds(len(g.Players))
+		if g.RoundsTotal != expectedRounds {
+			t.Errorf("Group %s with %d players: expected %d rounds, got %d",
+				g.Name, len(g.Players), expectedRounds, g.RoundsTotal)
+		}
+	}
+}
+
+func TestEngineProposeGroupsSerpentineCorrectness(t *testing.T) {
+	// Test the engine directly to verify serpentine assignment
+	wam := engine.NewWAM(zerolog.Nop())
+
+	players := make([]engine.Player, 12)
+	for i := 0; i < 12; i++ {
+		players[i] = engine.Player{
+			StartNo: i + 1,
+			Name:    "Player " + string(rune('A'+i)),
+			Rating:  1200 - i*10, // A=1200, B=1190, ..., L=1090
+		}
+	}
+
+	config := &engine.WAMConfig{
+		DefaultGroupSize:  4,
+		AllowedGroupSizes: []int{4, 6},
+		YouthAgeLimit:     12,
+	}
+
+	proposal, err := wam.ProposeGroups(players, config, nil, time.Now())
+	if err != nil {
+		t.Fatalf("ProposeGroups failed: %v", err)
+	}
+
+	// With serpentine for 3 groups of 4:
+	// Row 1: A(1200)->G1, B(1190)->G2, C(1180)->G3
+	// Row 2: D(1170)->G3, E(1160)->G2, F(1150)->G1
+	// Row 3: G(1140)->G1, H(1130)->G2, I(1120)->G3
+	// Row 4: J(1110)->G3, K(1100)->G2, L(1090)->G1
+	// Group 1: A, F, G, L (1200+1150+1140+1090 = 4580, avg = 1145)
+	// Group 2: B, E, H, K (1190+1160+1130+1100 = 4580, avg = 1145)
+	// Group 3: C, D, I, J (1180+1170+1120+1110 = 4580, avg = 1145)
+
+	if len(proposal.Groups) != 3 {
+		t.Fatalf("Expected 3 groups, got %d", len(proposal.Groups))
+	}
+
+	// Calculate average ratings for each group
+	avgRatings := make([]float64, 3)
+	for i, g := range proposal.Groups {
+		sum := 0
+		for _, p := range g.Players {
+			sum += p.Rating
+		}
+		avgRatings[i] = float64(sum) / float64(len(g.Players))
+	}
+
+	// All groups should have similar averages (within 20 points difference)
+	for i := 0; i < len(avgRatings); i++ {
+		for j := i + 1; j < len(avgRatings); j++ {
+			diff := avgRatings[i] - avgRatings[j]
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff > 20 {
+				t.Errorf("Serpentine not balanced: Group %d avg=%.1f, Group %d avg=%.1f, diff=%.1f",
+					i+1, avgRatings[i], j+1, avgRatings[j], diff)
+			}
+		}
+	}
+}
+
+func TestEngineIsU12Player(t *testing.T) {
+	now := time.Date(2025, 6, 15, 0, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name      string
+		birthDate time.Time
+		ageLimit  int
+		expected  bool
+	}{
+		{"10 year old, limit 12", now.AddDate(-10, 0, 0), 12, true},
+		{"11 year old, limit 12", now.AddDate(-11, 0, 0), 12, true},
+		{"Just turned 12, limit 12", now.AddDate(-12, 0, 0), 12, false},
+		{"12 year old, limit 12", now.AddDate(-12, -1, 0), 12, false},
+		{"15 year old, limit 12", now.AddDate(-15, 0, 0), 12, false},
+		{"10 year old, limit 10", now.AddDate(-10, 0, 0), 10, false},
+		{"9 year old, limit 10", now.AddDate(-9, 0, 0), 10, true},
+		{"Birthday tomorrow", now.AddDate(-12, 0, 1), 12, true}, // Still 11
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := engine.IsU12Player(&tt.birthDate, now, tt.ageLimit)
+			if result != tt.expected {
+				t.Errorf("IsU12Player() = %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestServiceProposeGroupsNoParticipants(t *testing.T) {
+	repo := NewMockRepository()
+	logger := zerolog.Nop()
+	svc := NewService(repo, logger)
+	ctx := context.Background()
+	tournamentID := uuid.New()
+
+	repo.config = &WAMConfig{
+		TournamentID: tournamentID,
+		CurrentPhase: engine.WAMPhaseSetup,
+	}
+
+	// No participants
+	repo.participants = []TournamentParticipant{}
+
+	_, err := svc.ProposeGroups(ctx, tournamentID)
+	if err != ErrNoParticipants {
+		t.Errorf("Expected ErrNoParticipants, got %v", err)
+	}
+}
+
+func TestServiceProposeGroupsWrongPhase(t *testing.T) {
+	repo := NewMockRepository()
+	logger := zerolog.Nop()
+	svc := NewService(repo, logger)
+	ctx := context.Background()
+	tournamentID := uuid.New()
+
+	repo.config = &WAMConfig{
+		TournamentID: tournamentID,
+		CurrentPhase: engine.WAMPhaseGroup, // Wrong phase
+	}
+
+	repo.participants = []TournamentParticipant{
+		{ParticipantID: uuid.New(), Name: "Player A", Rating: 1500},
+	}
+
+	_, err := svc.ProposeGroups(ctx, tournamentID)
+	if err != ErrInvalidPhase {
+		t.Errorf("Expected ErrInvalidPhase, got %v", err)
+	}
+}
+
+// Helper function
+func containsSubstr(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

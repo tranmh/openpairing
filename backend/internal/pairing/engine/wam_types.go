@@ -31,18 +31,20 @@ const (
 
 // WAMConfig holds configuration for a WAM tournament
 type WAMConfig struct {
-	TournamentID     uuid.UUID          `json:"tournamentId"`
-	GroupSize        int                `json:"groupSize"`        // User-chosen: 3, 4, 5, 6, etc.
-	AssignmentMethod WAMGroupAssignment `json:"assignmentMethod"` // sequential, serpentine, random, manual
-	EnablePlayoffs   bool               `json:"enablePlayoffs"`
-	PlayoffsTopN     int                `json:"playoffsTopN"`     // Top N from each group advance
-	ThirdPlaceMatch  bool               `json:"thirdPlaceMatch"`
-	YouthAgeLimit    int                `json:"youthAgeLimit"`    // For soft warning (default 12)
-	CurrentPhase     WAMPhase           `json:"currentPhase"`
-	Tiebreaks        []string           `json:"tiebreaks"` // ["direct_encounter", "sonneborn_berger", "buchholz"]
-	Season           string             `json:"season"`    // e.g., "2025/2026"
-	CreatedAt        time.Time          `json:"createdAt"`
-	UpdatedAt        time.Time          `json:"updatedAt"`
+	TournamentID      uuid.UUID          `json:"tournamentId"`
+	GroupSize         int                `json:"groupSize"`         // Deprecated: use DefaultGroupSize
+	DefaultGroupSize  int                `json:"defaultGroupSize"`  // Preferred group size (default 4)
+	AllowedGroupSizes []int              `json:"allowedGroupSizes"` // Allowed sizes, e.g., [4, 6]
+	AssignmentMethod  WAMGroupAssignment `json:"assignmentMethod"`  // sequential, serpentine, random, manual
+	EnablePlayoffs    bool               `json:"enablePlayoffs"`
+	PlayoffsTopN      int                `json:"playoffsTopN"`  // Top N from each group advance
+	ThirdPlaceMatch   bool               `json:"thirdPlaceMatch"`
+	YouthAgeLimit     int                `json:"youthAgeLimit"` // For soft warning (default 12)
+	CurrentPhase      WAMPhase           `json:"currentPhase"`
+	Tiebreaks         []string           `json:"tiebreaks"` // ["direct_encounter", "sonneborn_berger", "buchholz"]
+	Season            string             `json:"season"`    // e.g., "2025/2026"
+	CreatedAt         time.Time          `json:"createdAt"`
+	UpdatedAt         time.Time          `json:"updatedAt"`
 }
 
 // WAMGroup represents a single group in the WAM tournament
@@ -51,6 +53,7 @@ type WAMGroup struct {
 	TournamentID uuid.UUID        `json:"tournamentId"`
 	Name         string           `json:"name"`        // "A", "B", "C", etc.
 	GroupNumber  int              `json:"groupNumber"` // 1, 2, 3, etc.
+	TargetSize   int              `json:"targetSize"`  // Target group size (4 or 6)
 	Players      []WAMGroupPlayer `json:"players"`
 	RoundsTotal  int              `json:"roundsTotal"`
 	RoundsPlayed int              `json:"roundsPlayed"`
@@ -61,25 +64,29 @@ type WAMGroup struct {
 
 // WAMGroupPlayer represents a player's status within a group
 type WAMGroupPlayer struct {
-	ID             uuid.UUID  `json:"id"`
-	GroupID        uuid.UUID  `json:"groupId"`
-	ParticipantID  uuid.UUID  `json:"participantId"`
-	PlayerID       uuid.UUID  `json:"playerId,omitempty"`
-	Name           string     `json:"name"`
-	Rating         int        `json:"rating"`
-	ClubID         *uuid.UUID `json:"clubId,omitempty"`
-	ClubName       *string    `json:"clubName,omitempty"`
-	BirthDate      *time.Time `json:"birthDate,omitempty"`
-	SortOrder      int        `json:"sortOrder"`      // Position within group (1-indexed)
-	OriginalIndex  int        `json:"originalIndex"`  // Index in original participants array (0-indexed)
-	Points         float64    `json:"points"`
-	Wins           int        `json:"wins"`
-	Draws          int        `json:"draws"`
-	Losses         int        `json:"losses"`
-	IsGroupWinner  bool       `json:"isGroupWinner"`
-	QualifiedFinal bool       `json:"qualifiedFinal"` // Qualified for annual finals
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	ID              uuid.UUID  `json:"id"`
+	GroupID         uuid.UUID  `json:"groupId"`
+	ParticipantID   uuid.UUID  `json:"participantId"`
+	PlayerID        uuid.UUID  `json:"playerId,omitempty"`
+	Name            string     `json:"name"`
+	Rating          int        `json:"rating"`
+	JokerPoints     int        `json:"jokerPoints"`     // 0, 50, 100, or 150
+	EffectiveRating int        `json:"effectiveRating"` // Rating + JokerPoints
+	IsU12           bool       `json:"isU12"`           // Player is under youth age limit
+	Age             *int       `json:"age,omitempty"`   // Calculated age at tournament start
+	ClubID          *uuid.UUID `json:"clubId,omitempty"`
+	ClubName        *string    `json:"clubName,omitempty"`
+	BirthDate       *time.Time `json:"birthDate,omitempty"`
+	SortOrder       int        `json:"sortOrder"`     // Position within group (1-indexed)
+	OriginalIndex   int        `json:"originalIndex"` // Index in original participants array (0-indexed)
+	Points          float64    `json:"points"`
+	Wins            int        `json:"wins"`
+	Draws           int        `json:"draws"`
+	Losses          int        `json:"losses"`
+	IsGroupWinner   bool       `json:"isGroupWinner"`
+	QualifiedFinal  bool       `json:"qualifiedFinal"` // Qualified for annual finals
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
 }
 
 // WAMGroupStanding represents standings within a group

@@ -39,19 +39,30 @@ func NewService(repo Repository, logger zerolog.Logger) *Service {
 func (s *Service) ConfigureWAM(ctx context.Context, tournamentID uuid.UUID, req *ConfigureWAMRequest) (*WAMConfig, error) {
 	// Build config
 	config := &WAMConfig{
-		TournamentID:     tournamentID,
-		GroupSize:        req.GroupSize,
-		AssignmentMethod: engine.WAMGroupAssignment(req.AssignmentMethod),
-		EnablePlayoffs:   req.EnablePlayoffs,
-		PlayoffsTopN:     req.PlayoffsTopN,
-		ThirdPlaceMatch:  req.ThirdPlaceMatch,
-		YouthAgeLimit:    req.YouthAgeLimit,
-		CurrentPhase:     engine.WAMPhaseSetup,
-		Tiebreaks:        req.Tiebreaks,
-		Season:           req.Season,
+		TournamentID:      tournamentID,
+		GroupSize:         req.GroupSize,
+		DefaultGroupSize:  req.DefaultGroupSize,
+		AllowedGroupSizes: req.AllowedGroupSizes,
+		AssignmentMethod:  engine.WAMGroupAssignment(req.AssignmentMethod),
+		EnablePlayoffs:    req.EnablePlayoffs,
+		PlayoffsTopN:      req.PlayoffsTopN,
+		ThirdPlaceMatch:   req.ThirdPlaceMatch,
+		YouthAgeLimit:     req.YouthAgeLimit,
+		CurrentPhase:      engine.WAMPhaseSetup,
+		Tiebreaks:         req.Tiebreaks,
+		Season:            req.Season,
 	}
 
 	// Set defaults
+	if config.DefaultGroupSize == 0 {
+		config.DefaultGroupSize = req.GroupSize
+	}
+	if config.DefaultGroupSize == 0 {
+		config.DefaultGroupSize = 4
+	}
+	if len(config.AllowedGroupSizes) == 0 {
+		config.AllowedGroupSizes = []int{4, 6}
+	}
 	if config.PlayoffsTopN == 0 {
 		config.PlayoffsTopN = 1
 	}
@@ -116,13 +127,15 @@ func (s *Service) AssignGroups(ctx context.Context, tournamentID uuid.UUID, req 
 		return nil, ErrNoParticipants
 	}
 
-	// Convert to engine.Player format
+	// Convert to engine.Player format using effective rating (rating + joker)
 	players := make([]engine.Player, len(participants))
 	for i, p := range participants {
+		effectiveRating := p.Rating + p.JokerPoints
 		players[i] = engine.Player{
-			StartNo: i + 1,
-			Name:    p.Name,
-			Rating:  p.Rating,
+			StartNo:   i + 1,
+			Name:      p.Name,
+			Rating:    effectiveRating, // Use effective rating for sorting
+			BirthDate: p.BirthDate,
 		}
 	}
 
@@ -159,15 +172,20 @@ func (s *Service) AssignGroups(ctx context.Context, tournamentID uuid.UUID, req 
 			// Use OriginalIndex to map back to original participant
 			// OriginalIndex is 0-indexed, set by the engine from player.StartNo - 1
 			var participantID uuid.UUID
+			var participant *TournamentParticipant
 			if ep.OriginalIndex >= 0 && ep.OriginalIndex < len(participants) {
 				participantID = participants[ep.OriginalIndex].ParticipantID
+				participant = &participants[ep.OriginalIndex]
 			}
 
-			if participantID != uuid.Nil {
+			if participantID != uuid.Nil && participant != nil {
 				member := &WAMGroupPlayer{
-					GroupID:       group.ID,
-					ParticipantID: participantID,
-					SortOrder:     j + 1,
+					GroupID:         group.ID,
+					ParticipantID:   participantID,
+					SortOrder:       j + 1,
+					Rating:          participant.Rating,
+					JokerPoints:     participant.JokerPoints,
+					EffectiveRating: participant.Rating + participant.JokerPoints,
 				}
 				if err := s.repo.AddGroupMember(ctx, member); err != nil {
 					return nil, err
@@ -732,5 +750,240 @@ func (s *Service) GetStatus(ctx context.Context, tournamentID uuid.UUID) (*WAMTo
 		CanStartGroups:   config.CurrentPhase == engine.WAMPhaseSetup && assignedCount > 0,
 		CanStartPlayoffs: config.EnablePlayoffs && config.CurrentPhase == engine.WAMPhaseGroup && allComplete,
 		Warnings:         warnings,
+	}, nil
+}
+
+// SetJokerPoints sets joker points for a participant (only allowed in setup phase)
+func (s *Service) SetJokerPoints(ctx context.Context, tournamentID, participantID uuid.UUID, jokerPoints int) error {
+	config, err := s.repo.GetConfig(ctx, tournamentID)
+	if err != nil {
+		return err
+	}
+
+	// Only allow in setup phase (before group assignment)
+	if config.CurrentPhase != engine.WAMPhaseSetup {
+		return ErrInvalidPhase
+	}
+
+	// Validate joker points
+	if jokerPoints != 0 && jokerPoints != 50 && jokerPoints != 100 && jokerPoints != 150 {
+		return fmt.Errorf("invalid joker points: must be 0, 50, 100, or 150")
+	}
+
+	if err := s.repo.SetJokerPoints(ctx, tournamentID, participantID, jokerPoints); err != nil {
+		return err
+	}
+
+	s.logger.Info().
+		Str("tournament_id", tournamentID.String()).
+		Str("participant_id", participantID.String()).
+		Int("joker_points", jokerPoints).
+		Msg("Joker points set")
+
+	return nil
+}
+
+// ProposeGroups generates a group proposal for review
+func (s *Service) ProposeGroups(ctx context.Context, tournamentID uuid.UUID) (*GroupProposal, error) {
+	config, err := s.repo.GetConfig(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	if config.CurrentPhase != engine.WAMPhaseSetup {
+		return nil, ErrInvalidPhase
+	}
+
+	// Get participants
+	participants, err := s.repo.GetTournamentParticipants(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(participants) == 0 {
+		return nil, ErrNoParticipants
+	}
+
+	// Convert to engine.Player format with effective rating
+	players := make([]engine.Player, len(participants))
+	u12Flags := make(map[int]bool)
+	refDate := time.Now()
+
+	for i, p := range participants {
+		effectiveRating := p.Rating + p.JokerPoints
+		players[i] = engine.Player{
+			StartNo:   i + 1,
+			Name:      p.Name,
+			Rating:    effectiveRating,
+			BirthDate: p.BirthDate,
+		}
+
+		// Check U12 status
+		if p.BirthDate != nil && config.YouthAgeLimit > 0 {
+			if engine.IsU12Player(p.BirthDate, refDate, config.YouthAgeLimit) {
+				u12Flags[i+1] = true
+			}
+		}
+	}
+
+	// Generate proposal using engine
+	engineProposal, err := s.engine.ProposeGroups(players, config, u12Flags, refDate)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to response format
+	proposal := &GroupProposal{
+		TotalPlayers: engineProposal.TotalPlayers,
+		Warnings:     engineProposal.Warnings,
+	}
+
+	// Convert groups
+	for _, eg := range engineProposal.Groups {
+		group := ProposedGroup{
+			Name:       eg.Name,
+			TargetSize: eg.TargetSize,
+			IsU12Group: eg.IsU12Group,
+			Players:    make([]TournamentParticipant, 0, len(eg.Players)),
+		}
+
+		for _, ep := range eg.Players {
+			// Map back to participant
+			if ep.OriginalIndex >= 0 && ep.OriginalIndex < len(participants) {
+				p := participants[ep.OriginalIndex]
+				p.IsU12 = ep.IsU12
+				p.Age = ep.Age
+				group.Players = append(group.Players, p)
+			}
+		}
+
+		proposal.Groups = append(proposal.Groups, group)
+	}
+
+	// Convert U12 proposals
+	for _, u12p := range engineProposal.U12Proposals {
+		u12Proposal := U12GroupProposal{
+			GroupName:        u12p.GroupName,
+			Reason:           u12p.Reason,
+			RequiresApproval: u12p.RequiresApproval,
+			Players:          make([]TournamentParticipant, 0, len(u12p.Players)),
+		}
+
+		for _, ep := range u12p.Players {
+			// BUGFIX: Use OriginalIndex instead of name matching to avoid duplicates
+			if ep.OriginalIndex >= 0 && ep.OriginalIndex < len(participants) {
+				p := participants[ep.OriginalIndex]
+				p.IsU12 = true
+				u12Proposal.Players = append(u12Proposal.Players, p)
+			}
+		}
+
+		proposal.U12Proposals = append(proposal.U12Proposals, u12Proposal)
+	}
+
+	s.logger.Info().
+		Str("tournament_id", tournamentID.String()).
+		Int("groups", len(proposal.Groups)).
+		Int("u12_proposals", len(proposal.U12Proposals)).
+		Msg("Group proposal generated")
+
+	return proposal, nil
+}
+
+// ConfirmGroups confirms a proposed group configuration
+func (s *Service) ConfirmGroups(ctx context.Context, tournamentID uuid.UUID, req *ConfirmGroupsRequest) (*AssignGroupsResponse, error) {
+	config, err := s.repo.GetConfig(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	if config.CurrentPhase != engine.WAMPhaseSetup {
+		return nil, ErrInvalidPhase
+	}
+
+	// Get participants for validation
+	participants, err := s.repo.GetTournamentParticipants(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create participant lookup map
+	participantMap := make(map[uuid.UUID]*TournamentParticipant)
+	for i := range participants {
+		participantMap[participants[i].ParticipantID] = &participants[i]
+	}
+
+	// Delete existing groups
+	if err := s.repo.DeleteAllGroups(ctx, tournamentID); err != nil {
+		return nil, err
+	}
+
+	var warnings []string
+
+	// Create groups from confirmed proposal
+	for i, confirmed := range req.Proposals {
+		targetSize := confirmed.TargetSize
+		if targetSize == 0 {
+			targetSize = len(confirmed.ParticipantIDs)
+		}
+
+		group := WAMGroup{
+			ID:           uuid.New(),
+			TournamentID: tournamentID,
+			Name:         confirmed.GroupName,
+			GroupNumber:  i + 1,
+			TargetSize:   targetSize,
+			RoundsTotal:  engine.GetTotalGroupRounds(len(confirmed.ParticipantIDs)),
+			RoundsPlayed: 0,
+			IsComplete:   false,
+		}
+
+		if err := s.repo.CreateGroup(ctx, &group); err != nil {
+			return nil, err
+		}
+
+		// Add members
+		for j, pid := range confirmed.ParticipantIDs {
+			participant := participantMap[pid]
+			if participant == nil {
+				warnings = append(warnings, fmt.Sprintf("Participant %s not found", pid))
+				continue
+			}
+
+			member := &WAMGroupPlayer{
+				GroupID:         group.ID,
+				ParticipantID:   pid,
+				SortOrder:       j + 1,
+				Rating:          participant.Rating,
+				JokerPoints:     participant.JokerPoints,
+				EffectiveRating: participant.Rating + participant.JokerPoints,
+			}
+			if err := s.repo.AddGroupMember(ctx, member); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	// Reload groups with members
+	groups, err := s.repo.ListGroups(ctx, tournamentID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Detect club conflicts
+	conflicts := s.engine.DetectClubConflicts(groups)
+	for _, conflict := range conflicts {
+		warnings = append(warnings, fmt.Sprintf("Gruppe %s: %d Spieler vom Verein %s",
+			conflict.GroupName, len(conflict.Players), conflict.ClubName))
+	}
+
+	s.logger.Info().
+		Str("tournament_id", tournamentID.String()).
+		Int("groups", len(groups)).
+		Msg("Groups confirmed")
+
+	return &AssignGroupsResponse{
+		Groups:   groups,
+		Warnings: warnings,
 	}, nil
 }

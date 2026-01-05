@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
+import { WamGroupsTab, WamParticipantsTab } from '@/components/wam';
 
 interface Tournament {
   id: string;
@@ -63,6 +64,7 @@ interface Tournament {
   fideRated: boolean;
   dwzRated: boolean;
   pairingSystem: string;
+  pairingEngine: string;
   tiebreaks: string[];
 }
 
@@ -357,6 +359,9 @@ export default function TournamentDetailPage() {
         <TabsList>
           <TabsTrigger value="overview">Übersicht</TabsTrigger>
           <TabsTrigger value="participants">Teilnehmer</TabsTrigger>
+          {tournament.pairingEngine === 'wam' && (
+            <TabsTrigger value="groups">Gruppen</TabsTrigger>
+          )}
           <TabsTrigger value="pairings">Paarungen</TabsTrigger>
           <TabsTrigger value="standings">Tabelle</TabsTrigger>
         </TabsList>
@@ -431,12 +436,29 @@ export default function TournamentDetailPage() {
         </TabsContent>
 
         <TabsContent value="participants">
-          <ParticipantsTab
-            tournamentId={tournamentId}
-            participants={participants}
-            canRegister={tournament.status === 'registration'}
-          />
+          {tournament.pairingEngine === 'wam' ? (
+            <WamParticipantsTab
+              tournamentId={tournamentId}
+              canRegister={tournament.status === 'registration'}
+              canModify={['draft', 'published', 'registration'].includes(tournament.status)}
+            />
+          ) : (
+            <ParticipantsTab
+              tournamentId={tournamentId}
+              participants={participants}
+              canRegister={tournament.status === 'registration'}
+            />
+          )}
         </TabsContent>
+
+        {tournament.pairingEngine === 'wam' && (
+          <TabsContent value="groups">
+            <WamGroupsTab
+              tournamentId={tournamentId}
+              canModify={['draft', 'published', 'registration'].includes(tournament.status)}
+            />
+          </TabsContent>
+        )}
 
         <TabsContent value="pairings">
           <PairingsTab tournamentId={tournamentId} rounds={rounds} />

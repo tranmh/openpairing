@@ -65,6 +65,10 @@ type Repository interface {
 
 	// Tournament Participants (for assignment)
 	GetTournamentParticipants(ctx context.Context, tournamentID uuid.UUID) ([]TournamentParticipant, error)
+
+	// Joker Operations
+	SetJokerPoints(ctx context.Context, tournamentID, participantID uuid.UUID, jokerPoints int) error
+	GetJokerPoints(ctx context.Context, tournamentID, participantID uuid.UUID) (int, error)
 }
 
 // PostgresRepository implements Repository using PostgreSQL
@@ -85,12 +89,29 @@ func (r *PostgresRepository) CreateConfig(ctx context.Context, config *WAMConfig
 		return err
 	}
 
+	// Use DefaultGroupSize if set, otherwise fall back to GroupSize
+	defaultGroupSize := config.DefaultGroupSize
+	if defaultGroupSize == 0 {
+		defaultGroupSize = config.GroupSize
+	}
+	if defaultGroupSize == 0 {
+		defaultGroupSize = 4
+	}
+
+	// Default allowed sizes
+	allowedSizes := config.AllowedGroupSizes
+	if len(allowedSizes) == 0 {
+		allowedSizes = []int{4, 6}
+	}
+
 	_, err = r.db.Exec(ctx, `
 		INSERT INTO wam_tournament_config (
-			tournament_id, group_size, assignment_method, enable_playoffs, playoffs_top_n,
+			tournament_id, group_size, default_group_size, allowed_group_sizes,
+			assignment_method, enable_playoffs, playoffs_top_n,
 			third_place_match, youth_age_limit, current_phase, tiebreaks, season
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, config.TournamentID, config.GroupSize, config.AssignmentMethod, config.EnablePlayoffs,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+	`, config.TournamentID, config.GroupSize, defaultGroupSize, allowedSizes,
+		config.AssignmentMethod, config.EnablePlayoffs,
 		config.PlayoffsTopN, config.ThirdPlaceMatch, config.YouthAgeLimit, config.CurrentPhase,
 		tiebreaksJSON, config.Season)
 
@@ -102,12 +123,14 @@ func (r *PostgresRepository) GetConfig(ctx context.Context, tournamentID uuid.UU
 	var tiebreaksJSON []byte
 
 	err := r.db.QueryRow(ctx, `
-		SELECT tournament_id, group_size, assignment_method, enable_playoffs, playoffs_top_n,
+		SELECT tournament_id, group_size, COALESCE(default_group_size, group_size, 4),
+		       COALESCE(allowed_group_sizes, ARRAY[4,6]), assignment_method, enable_playoffs, playoffs_top_n,
 		       third_place_match, youth_age_limit, current_phase, tiebreaks, season,
 		       created_at, updated_at
 		FROM wam_tournament_config WHERE tournament_id = $1
 	`, tournamentID).Scan(
-		&config.TournamentID, &config.GroupSize, &config.AssignmentMethod, &config.EnablePlayoffs,
+		&config.TournamentID, &config.GroupSize, &config.DefaultGroupSize,
+		&config.AllowedGroupSizes, &config.AssignmentMethod, &config.EnablePlayoffs,
 		&config.PlayoffsTopN, &config.ThirdPlaceMatch, &config.YouthAgeLimit, &config.CurrentPhase,
 		&tiebreaksJSON, &config.Season, &config.CreatedAt, &config.UpdatedAt,
 	)
@@ -132,12 +155,28 @@ func (r *PostgresRepository) UpdateConfig(ctx context.Context, config *WAMConfig
 		return err
 	}
 
+	// Ensure defaults
+	defaultGroupSize := config.DefaultGroupSize
+	if defaultGroupSize == 0 {
+		defaultGroupSize = config.GroupSize
+	}
+	if defaultGroupSize == 0 {
+		defaultGroupSize = 4
+	}
+
+	allowedSizes := config.AllowedGroupSizes
+	if len(allowedSizes) == 0 {
+		allowedSizes = []int{4, 6}
+	}
+
 	result, err := r.db.Exec(ctx, `
 		UPDATE wam_tournament_config SET
-			group_size = $2, assignment_method = $3, enable_playoffs = $4, playoffs_top_n = $5,
-			third_place_match = $6, youth_age_limit = $7, current_phase = $8, tiebreaks = $9, season = $10
+			group_size = $2, default_group_size = $3, allowed_group_sizes = $4,
+			assignment_method = $5, enable_playoffs = $6, playoffs_top_n = $7,
+			third_place_match = $8, youth_age_limit = $9, current_phase = $10, tiebreaks = $11, season = $12
 		WHERE tournament_id = $1
-	`, config.TournamentID, config.GroupSize, config.AssignmentMethod, config.EnablePlayoffs,
+	`, config.TournamentID, config.GroupSize, defaultGroupSize, allowedSizes,
+		config.AssignmentMethod, config.EnablePlayoffs,
 		config.PlayoffsTopN, config.ThirdPlaceMatch, config.YouthAgeLimit, config.CurrentPhase,
 		tiebreaksJSON, config.Season)
 
@@ -164,10 +203,16 @@ func (r *PostgresRepository) CreateGroup(ctx context.Context, group *WAMGroup) e
 	group.CreatedAt = time.Now()
 	group.UpdatedAt = time.Now()
 
+	// Default target size
+	targetSize := group.TargetSize
+	if targetSize == 0 {
+		targetSize = 4
+	}
+
 	_, err := r.db.Exec(ctx, `
-		INSERT INTO wam_groups (id, tournament_id, name, group_number, rounds_total, rounds_played, is_complete, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`, group.ID, group.TournamentID, group.Name, group.GroupNumber, group.RoundsTotal, group.RoundsPlayed, group.IsComplete, group.CreatedAt, group.UpdatedAt)
+		INSERT INTO wam_groups (id, tournament_id, name, group_number, target_size, rounds_total, rounds_played, is_complete, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, group.ID, group.TournamentID, group.Name, group.GroupNumber, targetSize, group.RoundsTotal, group.RoundsPlayed, group.IsComplete, group.CreatedAt, group.UpdatedAt)
 
 	return err
 }
@@ -176,11 +221,11 @@ func (r *PostgresRepository) GetGroup(ctx context.Context, groupID uuid.UUID) (*
 	var group WAMGroup
 
 	err := r.db.QueryRow(ctx, `
-		SELECT id, tournament_id, name, group_number, rounds_total, rounds_played, is_complete, created_at, updated_at
+		SELECT id, tournament_id, name, group_number, COALESCE(target_size, 4), rounds_total, rounds_played, is_complete, created_at, updated_at
 		FROM wam_groups WHERE id = $1
 	`, groupID).Scan(
 		&group.ID, &group.TournamentID, &group.Name, &group.GroupNumber,
-		&group.RoundsTotal, &group.RoundsPlayed, &group.IsComplete,
+		&group.TargetSize, &group.RoundsTotal, &group.RoundsPlayed, &group.IsComplete,
 		&group.CreatedAt, &group.UpdatedAt,
 	)
 
@@ -235,7 +280,7 @@ func (r *PostgresRepository) UpdateGroup(ctx context.Context, group *WAMGroup) e
 
 func (r *PostgresRepository) ListGroups(ctx context.Context, tournamentID uuid.UUID) ([]WAMGroup, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, tournament_id, name, group_number, rounds_total, rounds_played, is_complete, created_at, updated_at
+		SELECT id, tournament_id, name, group_number, COALESCE(target_size, 4), rounds_total, rounds_played, is_complete, created_at, updated_at
 		FROM wam_groups WHERE tournament_id = $1 ORDER BY group_number
 	`, tournamentID)
 	if err != nil {
@@ -248,7 +293,7 @@ func (r *PostgresRepository) ListGroups(ctx context.Context, tournamentID uuid.U
 		var group WAMGroup
 		if err := rows.Scan(
 			&group.ID, &group.TournamentID, &group.Name, &group.GroupNumber,
-			&group.RoundsTotal, &group.RoundsPlayed, &group.IsComplete,
+			&group.TargetSize, &group.RoundsTotal, &group.RoundsPlayed, &group.IsComplete,
 			&group.CreatedAt, &group.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -286,10 +331,16 @@ func (r *PostgresRepository) AddGroupMember(ctx context.Context, member *WAMGrou
 	member.CreatedAt = time.Now()
 	member.UpdatedAt = time.Now()
 
+	// Calculate effective rating
+	effectiveRating := member.Rating + member.JokerPoints
+	if member.EffectiveRating > 0 {
+		effectiveRating = member.EffectiveRating
+	}
+
 	_, err := r.db.Exec(ctx, `
-		INSERT INTO wam_group_members (id, group_id, participant_id, sort_order, points, wins, draws, losses, is_group_winner, qualified_final, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-	`, member.ID, member.GroupID, member.ParticipantID, member.SortOrder, member.Points,
+		INSERT INTO wam_group_members (id, group_id, participant_id, sort_order, joker_points, effective_rating, points, wins, draws, losses, is_group_winner, qualified_final, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+	`, member.ID, member.GroupID, member.ParticipantID, member.SortOrder, member.JokerPoints, effectiveRating, member.Points,
 		member.Wins, member.Draws, member.Losses, member.IsGroupWinner, member.QualifiedFinal,
 		member.CreatedAt, member.UpdatedAt)
 
@@ -330,10 +381,12 @@ func (r *PostgresRepository) RemoveGroupMember(ctx context.Context, groupID, par
 
 func (r *PostgresRepository) GetGroupMembers(ctx context.Context, groupID uuid.UUID) ([]WAMGroupPlayer, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT m.id, m.group_id, m.participant_id, m.sort_order, m.points, m.wins, m.draws, m.losses,
+		SELECT m.id, m.group_id, m.participant_id, m.sort_order,
+		       COALESCE(m.joker_points, 0), COALESCE(m.effective_rating, 0),
+		       m.points, m.wins, m.draws, m.losses,
 		       m.is_group_winner, m.qualified_final, m.created_at, m.updated_at,
 		       tp.player_id, COALESCE(p.first_name || ' ' || p.last_name, '') as name,
-		       COALESCE(p.rating, 0) as rating, p.club_id, c.name as club_name, p.birth_date
+		       COALESCE(tp.starting_rating, p.dwz, 0) as rating, p.club_id, c.name as club_name, p.birth_date
 		FROM wam_group_members m
 		JOIN tournament_participants tp ON m.participant_id = tp.id
 		JOIN players p ON tp.player_id = p.id
@@ -350,12 +403,18 @@ func (r *PostgresRepository) GetGroupMembers(ctx context.Context, groupID uuid.U
 	for rows.Next() {
 		var m WAMGroupPlayer
 		if err := rows.Scan(
-			&m.ID, &m.GroupID, &m.ParticipantID, &m.SortOrder, &m.Points,
+			&m.ID, &m.GroupID, &m.ParticipantID, &m.SortOrder,
+			&m.JokerPoints, &m.EffectiveRating,
+			&m.Points,
 			&m.Wins, &m.Draws, &m.Losses, &m.IsGroupWinner, &m.QualifiedFinal,
 			&m.CreatedAt, &m.UpdatedAt,
 			&m.PlayerID, &m.Name, &m.Rating, &m.ClubID, &m.ClubName, &m.BirthDate,
 		); err != nil {
 			return nil, err
+		}
+		// Calculate effective rating if not stored
+		if m.EffectiveRating == 0 {
+			m.EffectiveRating = m.Rating + m.JokerPoints
 		}
 		members = append(members, m)
 	}
@@ -711,12 +770,14 @@ func (r *PostgresRepository) GetTournamentParticipants(ctx context.Context, tour
 	rows, err := r.db.Query(ctx, `
 		SELECT tp.id, tp.player_id,
 		       COALESCE(p.first_name || ' ' || p.last_name, '') as name,
-		       COALESCE(p.rating, 0) as rating, p.club_id, c.name as club_name, p.birth_date
+		       COALESCE(tp.starting_rating, p.dwz, 0) as rating,
+		       COALESCE(tp.joker_points, 0) as joker_points,
+		       p.club_id, c.name as club_name, p.birth_date
 		FROM tournament_participants tp
 		JOIN players p ON tp.player_id = p.id
 		LEFT JOIN clubs c ON p.club_id = c.id
 		WHERE tp.tournament_id = $1 AND tp.status = 'active'
-		ORDER BY COALESCE(p.rating, 0) DESC
+		ORDER BY (COALESCE(tp.starting_rating, p.dwz, 0) + COALESCE(tp.joker_points, 0)) DESC
 	`, tournamentID)
 	if err != nil {
 		return nil, err
@@ -728,6 +789,7 @@ func (r *PostgresRepository) GetTournamentParticipants(ctx context.Context, tour
 		var p TournamentParticipant
 		if err := rows.Scan(
 			&p.ParticipantID, &p.PlayerID, &p.Name, &p.Rating,
+			&p.JokerPoints,
 			&p.ClubID, &p.ClubName, &p.BirthDate,
 		); err != nil {
 			return nil, err
@@ -736,4 +798,34 @@ func (r *PostgresRepository) GetTournamentParticipants(ctx context.Context, tour
 	}
 
 	return participants, nil
+}
+
+// ===== Joker Operations =====
+
+func (r *PostgresRepository) SetJokerPoints(ctx context.Context, tournamentID, participantID uuid.UUID, jokerPoints int) error {
+	result, err := r.db.Exec(ctx, `
+		UPDATE tournament_participants SET joker_points = $3
+		WHERE tournament_id = $1 AND id = $2
+	`, tournamentID, participantID, jokerPoints)
+
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrMemberNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepository) GetJokerPoints(ctx context.Context, tournamentID, participantID uuid.UUID) (int, error) {
+	var jokerPoints int
+	err := r.db.QueryRow(ctx, `
+		SELECT COALESCE(joker_points, 0) FROM tournament_participants
+		WHERE tournament_id = $1 AND id = $2
+	`, tournamentID, participantID).Scan(&jokerPoints)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrMemberNotFound
+	}
+	return jokerPoints, err
 }
