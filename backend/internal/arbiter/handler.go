@@ -11,16 +11,24 @@ import (
 
 // Handler handles arbiter HTTP requests
 type Handler struct {
-	service *Service
-	logger  zerolog.Logger
+	service    *Service
+	monitorHub *MonitorHub
+	logger     zerolog.Logger
 }
 
 // NewHandler creates a new arbiter handler
 func NewHandler(service *Service, logger zerolog.Logger) *Handler {
+	hub := NewMonitorHub(service, logger)
 	return &Handler{
-		service: service,
-		logger:  logger.With().Str("handler", "arbiter").Logger(),
+		service:    service,
+		monitorHub: hub,
+		logger:     logger.With().Str("handler", "arbiter").Logger(),
 	}
+}
+
+// GetMonitorHub returns the monitor hub for external use
+func (h *Handler) GetMonitorHub() *MonitorHub {
+	return h.monitorHub
 }
 
 // RegisterRoutes registers arbiter routes
@@ -32,6 +40,9 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 		// Console & Status
 		arbiter.GET("/tournaments/:id/status", h.GetTournamentStatus)
 		arbiter.GET("/tournaments/:id/audit-log", h.GetAuditLog)
+
+		// Live Monitoring WebSocket
+		arbiter.GET("/tournaments/:id/monitor", h.monitorHub.HandleWebSocket)
 
 		// Player Management
 		arbiter.POST("/tournaments/:id/withdraw-player", h.WithdrawPlayer)

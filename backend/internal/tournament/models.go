@@ -314,6 +314,16 @@ type CreateTournamentRequest struct {
 	Settings           map[string]interface{} `json:"settings,omitempty"`
 }
 
+// CloneTournamentRequest is the request body for cloning a tournament
+type CloneTournamentRequest struct {
+	Name               string     `json:"name" binding:"required,min=1,max=255"`
+	Description        *string    `json:"description,omitempty"`
+	StartDate          *string    `json:"startDate,omitempty"`
+	EndDate            *string    `json:"endDate,omitempty"`
+	RegistrationOpens  *time.Time `json:"registrationOpens,omitempty"`
+	RegistrationCloses *time.Time `json:"registrationCloses,omitempty"`
+}
+
 // UpdateTournamentRequest is the request body for updating a tournament
 type UpdateTournamentRequest struct {
 	Name               *string          `json:"name,omitempty" binding:"omitempty,min=1,max=255"`

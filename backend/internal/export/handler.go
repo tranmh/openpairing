@@ -1,12 +1,37 @@
 package export
 
 import (
+	"archive/zip"
+	"bytes"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+// createZipArchive creates a ZIP archive containing multiple PDF files
+func createZipArchive(certificates []PDFExportResponse) ([]byte, error) {
+	buf := new(bytes.Buffer)
+	w := zip.NewWriter(buf)
+
+	for _, cert := range certificates {
+		f, err := w.Create(cert.Filename)
+		if err != nil {
+			return nil, err
+		}
+		_, err = f.Write(cert.Content)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
 
 // Handler handles export HTTP requests
 type Handler struct {
@@ -276,4 +301,100 @@ func (h *Handler) ExportCrosstablePDF(c *gin.Context) {
 
 	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
 	c.Data(http.StatusOK, export.MimeType, export.Content)
+}
+
+// ExportParticipantCertificate exports a certificate for a specific participant
+// @Summary Export participant certificate as PDF
+// @Description Generate a participation/achievement certificate for a tournament participant
+// @Tags export
+// @Produce application/pdf
+// @Param id path string true "Tournament ID"
+// @Param participantId path string true "Participant ID"
+// @Success 200 {file} file "PDF certificate"
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /tournaments/{id}/participants/{participantId}/certificate [get]
+func (h *Handler) ExportParticipantCertificate(c *gin.Context) {
+	tournamentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	participantID, err := uuid.Parse(c.Param("participantId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid participant ID"})
+		return
+	}
+
+	export, err := h.service.GenerateCertificate(c.Request.Context(), tournamentID, participantID)
+	if err != nil {
+		if err.Error() == "participant not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		if err.Error() == "tournament not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	c.Data(http.StatusOK, export.MimeType, export.Content)
+}
+
+// ExportTopCertificates exports certificates for top N participants
+// @Summary Export certificates for top players
+// @Description Generate certificates for top N participants (default top 3)
+// @Tags export
+// @Produce application/zip
+// @Param id path string true "Tournament ID"
+// @Param top query int false "Number of top players" default(3)
+// @Success 200 {file} file "ZIP file with certificates"
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /tournaments/{id}/certificates [get]
+func (h *Handler) ExportTopCertificates(c *gin.Context) {
+	tournamentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	topN := 3
+	if topStr := c.Query("top"); topStr != "" {
+		if n, err := strconv.Atoi(topStr); err == nil && n > 0 {
+			topN = n
+		}
+	}
+
+	certificates, err := h.service.GenerateAllCertificates(c.Request.Context(), tournamentID, topN)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(certificates) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no participants found"})
+		return
+	}
+
+	// If only one certificate, return it directly
+	if len(certificates) == 1 {
+		c.Header("Content-Disposition", "attachment; filename="+certificates[0].Filename)
+		c.Data(http.StatusOK, certificates[0].MimeType, certificates[0].Content)
+		return
+	}
+
+	// For multiple certificates, create a ZIP archive
+	zipContent, err := createZipArchive(certificates)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create archive"})
+		return
+	}
+
+	c.Header("Content-Disposition", "attachment; filename=certificates.zip")
+	c.Data(http.StatusOK, "application/zip", zipContent)
 }

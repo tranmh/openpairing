@@ -118,6 +118,102 @@ func (s *Service) CreateTournament(ctx context.Context, req *CreateTournamentReq
 	return tournament, nil
 }
 
+// CloneTournament creates a copy of an existing tournament with a new name
+func (s *Service) CloneTournament(ctx context.Context, id uuid.UUID, req *CloneTournamentRequest) (*Tournament, error) {
+	// Get the source tournament
+	source, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get source tournament: %w", err)
+	}
+
+	// Create a new tournament based on the source
+	clone := &Tournament{
+		ID:                 uuid.New(),
+		OrganizationID:     source.OrganizationID,
+		Name:               req.Name,
+		Description:        source.Description,
+		Type:               source.Type,
+		Mode:               source.Mode,
+		TimeControl:        source.TimeControl,
+		TimeControlType:    source.TimeControlType,
+		PairingEngine:      source.PairingEngine,
+		PairingSystem:      source.PairingSystem,
+		AcceleratedPairing: source.AcceleratedPairing,
+		MaxPlayers:         source.MaxPlayers,
+		MinPlayers:         source.MinPlayers,
+		Rounds:             source.Rounds,
+		VenueName:          source.VenueName,
+		VenueAddress:       source.VenueAddress,
+		VenueCity:          source.VenueCity,
+		VenueCountry:       source.VenueCountry,
+		FideRated:          source.FideRated,
+		DwzRated:           source.DwzRated,
+		OesbRated:          source.OesbRated,
+		EntryFeeCents:      source.EntryFeeCents,
+		Currency:           source.Currency,
+		Status:             StatusDraft, // Always start as draft
+		Tiebreaks:          source.Tiebreaks,
+		Settings:           source.Settings,
+		CurrentRound:       0,
+		ParticipantCount:   0,
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
+	}
+
+	// Apply override values if provided
+	if req.StartDate != nil {
+		startDate, err := time.Parse(time.RFC3339, *req.StartDate)
+		if err != nil {
+			startDate, err = time.Parse("2006-01-02", *req.StartDate)
+			if err != nil {
+				return nil, fmt.Errorf("invalid start date format: %w", err)
+			}
+		}
+		clone.StartDate = startDate
+	} else {
+		// Default to source start date + 1 year
+		clone.StartDate = source.StartDate.AddDate(1, 0, 0)
+	}
+
+	if req.EndDate != nil {
+		endDate, err := time.Parse(time.RFC3339, *req.EndDate)
+		if err != nil {
+			endDate, err = time.Parse("2006-01-02", *req.EndDate)
+			if err != nil {
+				return nil, fmt.Errorf("invalid end date format: %w", err)
+			}
+		}
+		clone.EndDate = &endDate
+	} else if source.EndDate != nil {
+		// Adjust end date by the same offset
+		diff := source.EndDate.Sub(source.StartDate)
+		newEnd := clone.StartDate.Add(diff)
+		clone.EndDate = &newEnd
+	}
+
+	if req.RegistrationOpens != nil {
+		clone.RegistrationOpens = req.RegistrationOpens
+	}
+	if req.RegistrationCloses != nil {
+		clone.RegistrationCloses = req.RegistrationCloses
+	}
+	if req.Description != nil {
+		clone.Description = req.Description
+	}
+
+	if err := s.repo.Create(ctx, clone); err != nil {
+		return nil, fmt.Errorf("failed to create cloned tournament: %w", err)
+	}
+
+	s.logger.Info().
+		Str("tournament_id", clone.ID.String()).
+		Str("source_id", id.String()).
+		Str("name", clone.Name).
+		Msg("Tournament cloned")
+
+	return clone, nil
+}
+
 // GetTournament retrieves a tournament by ID
 func (s *Service) GetTournament(ctx context.Context, id uuid.UUID) (*Tournament, error) {
 	return s.repo.GetByID(ctx, id)

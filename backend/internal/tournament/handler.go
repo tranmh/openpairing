@@ -52,6 +52,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 		organizer.Use(authMiddleware, organizerMiddleware)
 		{
 			organizer.POST("", h.CreateTournament)
+			organizer.POST("/:id/clone", h.CloneTournament)
 			organizer.PUT("/:id", h.UpdateTournament)
 			organizer.DELETE("/:id", h.DeleteTournament)
 			organizer.POST("/:id/publish", h.PublishTournament)
@@ -109,6 +110,38 @@ func (h *Handler) CreateTournament(c *gin.Context) {
 	tournament, err := h.service.CreateTournament(c.Request.Context(), &req, organizerID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to create tournament")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, TournamentResponse{Tournament: tournament})
+}
+
+// CloneTournament clones an existing tournament
+// @Summary Clone tournament
+// @Tags tournaments
+// @Accept json
+// @Produce json
+// @Param id path string true "Tournament ID"
+// @Param request body CloneTournamentRequest true "Clone data"
+// @Success 201 {object} TournamentResponse
+// @Router /tournaments/{id}/clone [post]
+func (h *Handler) CloneTournament(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tournament ID"})
+		return
+	}
+
+	var req CloneTournamentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	tournament, err := h.service.CloneTournament(c.Request.Context(), id, &req)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to clone tournament")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

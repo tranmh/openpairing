@@ -442,6 +442,82 @@ func (s *Service) registerDefaultTemplates() {
 </body>
 </html>
 `))
+
+	// Email verification template
+	s.templates["email_verification"] = template.Must(template.New("email_verification").Parse(`
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: #2563eb; color: white; padding: 20px; text-align: center; }
+        .content { padding: 20px; background: #f9fafb; }
+        .button { display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+        .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>OpenPairing</h1>
+        </div>
+        <div class="content">
+            <h2>Verify Your Email Address</h2>
+            <p>Hello {{.RecipientName}},</p>
+            <p>Thank you for registering with OpenPairing! Please click the button below to verify your email address:</p>
+            <p><a href="{{.Data.VerificationLink}}" class="button">Verify Email</a></p>
+            <p>If you didn't create an account with OpenPairing, you can safely ignore this email.</p>
+            <p>This link will expire in 24 hours.</p>
+        </div>
+        <div class="footer">
+            <p>© OpenPairing - Chess Tournament Management</p>
+        </div>
+    </div>
+</body>
+</html>
+`))
+
+	// Waitlist notification template
+	s.templates["waitlist_notification"] = template.Must(template.New("waitlist_notification").Parse(`
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: #16a34a; color: white; padding: 20px; text-align: center; }
+        .content { padding: 20px; background: #f9fafb; }
+        .highlight { background: #dcfce7; border: 1px solid #16a34a; border-radius: 8px; padding: 16px; margin: 16px 0; }
+        .button { display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+        .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Good News!</h1>
+        </div>
+        <div class="content">
+            <h2>A Spot Has Opened Up!</h2>
+            <p>Hello {{.RecipientName}},</p>
+            <div class="highlight">
+                <p>A spot has become available in <strong>{{.Data.TournamentName}}</strong>!</p>
+                <p>You were #{{.Data.WaitlistPosition}} on the waitlist.</p>
+            </div>
+            <p>Please confirm your registration within <strong>{{.Data.ExpiryHours}} hours</strong> to secure your spot.</p>
+            <p><a href="{{.Data.ConfirmLink}}" class="button">Confirm Registration</a></p>
+            <p>If you don't confirm in time, the spot will be offered to the next person on the waitlist.</p>
+        </div>
+        <div class="footer">
+            <p>© OpenPairing - Chess Tournament Management</p>
+        </div>
+    </div>
+</body>
+</html>
+`))
 }
 
 // SendPasswordReset sends a password reset email
@@ -484,4 +560,39 @@ func (s *Service) SendLineupDeadlineReminder(ctx context.Context, to, recipientN
 		RecipientName: recipientName,
 		Data:          data,
 	})
+}
+
+// SendEmailVerification sends an email verification email
+func (s *Service) SendEmailVerification(ctx context.Context, to, recipientName, verificationLink string) error {
+	return s.SendTemplate(ctx, []string{to}, "email_verification", "Verify Your Email - OpenPairing", &TemplateData{
+		RecipientName: recipientName,
+		Data: map[string]interface{}{
+			"VerificationLink": verificationLink,
+		},
+	})
+}
+
+// SendWaitlistNotification sends a notification when a waitlist spot becomes available
+func (s *Service) SendWaitlistNotification(ctx context.Context, to, recipientName string, data map[string]interface{}) error {
+	return s.SendTemplate(ctx, []string{to}, "waitlist_notification", fmt.Sprintf("Spot Available - %v", data["TournamentName"]), &TemplateData{
+		RecipientName: recipientName,
+		Data:          data,
+	})
+}
+
+// SendCertificate sends a tournament certificate email
+func (s *Service) SendCertificate(ctx context.Context, to, recipientName string, data map[string]interface{}, certificatePDF []byte) error {
+	email := &Email{
+		To:       []string{to},
+		Subject:  fmt.Sprintf("Your Certificate - %v", data["TournamentName"]),
+		HTMLBody: fmt.Sprintf(`<p>Hello %s,</p><p>Congratulations on your participation in %v! Please find your certificate attached.</p><p>Best regards,<br>OpenPairing</p>`, recipientName, data["TournamentName"]),
+		Attachments: []Attachment{
+			{
+				Filename:    "certificate.pdf",
+				ContentType: "application/pdf",
+				Data:        certificatePDF,
+			},
+		},
+	}
+	return s.Send(ctx, email)
 }

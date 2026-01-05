@@ -289,3 +289,121 @@ type PDFExportResponse struct {
 	Content  []byte       `json:"-"` // Binary content, not included in JSON
 	MimeType string       `json:"mimeType"`
 }
+
+// GenerateCertificate generates a certificate PDF for a participant
+func (s *Service) GenerateCertificate(ctx context.Context, tournamentID, participantID uuid.UUID) (*PDFExportResponse, error) {
+	// Get tournament and participant data
+	tournament, err := s.repo.GetTournamentExportData(ctx, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tournament data: %w", err)
+	}
+
+	// Find participant
+	var participant *ParticipantExport
+	for _, p := range tournament.Participants {
+		if p.ID == participantID {
+			participant = &p
+			break
+		}
+	}
+
+	if participant == nil {
+		return nil, fmt.Errorf("participant not found")
+	}
+
+	// Format date
+	dateStr := tournament.StartDate.Format("02 January 2006")
+	if tournament.EndDate != nil {
+		dateStr += " - " + tournament.EndDate.Format("02 January 2006")
+	}
+
+	certData := &CertificateData{
+		TournamentName:    tournament.Name,
+		TournamentDate:    dateStr,
+		PlayerName:        participant.Name,
+		PlayerFideID:      "",
+		FinalRank:         participant.Rank,
+		TotalParticipants: len(tournament.Participants),
+		Points:            participant.Points,
+		TotalRounds:       tournament.Rounds,
+		ArbiterName:       tournament.Chief,
+		OrganizerName:     "",
+	}
+
+	if participant.FideID != nil {
+		certData.PlayerFideID = *participant.FideID
+	}
+
+	pdfBytes, err := s.pdfGenerator.GenerateCertificatePDF(certData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate certificate: %w", err)
+	}
+
+	safeName := sanitizeFilename(participant.Name)
+	safeTournament := sanitizeFilename(tournament.Name)
+	filename := fmt.Sprintf("%s_%s_certificate.pdf", safeTournament, safeName)
+
+	return &PDFExportResponse{
+		Format:   FormatPDF,
+		Filename: filename,
+		Content:  pdfBytes,
+		MimeType: FormatPDF.GetMimeType(),
+	}, nil
+}
+
+// GenerateAllCertificates generates certificates for all participants or top N
+func (s *Service) GenerateAllCertificates(ctx context.Context, tournamentID uuid.UUID, topN int) ([]PDFExportResponse, error) {
+	tournament, err := s.repo.GetTournamentExportData(ctx, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tournament data: %w", err)
+	}
+
+	// Format date
+	dateStr := tournament.StartDate.Format("02 January 2006")
+	if tournament.EndDate != nil {
+		dateStr += " - " + tournament.EndDate.Format("02 January 2006")
+	}
+
+	var certificates []PDFExportResponse
+	count := len(tournament.Participants)
+	if topN > 0 && topN < count {
+		count = topN
+	}
+
+	for i := 0; i < count; i++ {
+		p := tournament.Participants[i]
+
+		certData := &CertificateData{
+			TournamentName:    tournament.Name,
+			TournamentDate:    dateStr,
+			PlayerName:        p.Name,
+			FinalRank:         p.Rank,
+			TotalParticipants: len(tournament.Participants),
+			Points:            p.Points,
+			TotalRounds:       tournament.Rounds,
+			ArbiterName:       tournament.Chief,
+		}
+
+		if p.FideID != nil {
+			certData.PlayerFideID = *p.FideID
+		}
+
+		pdfBytes, err := s.pdfGenerator.GenerateCertificatePDF(certData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate certificate for %s: %w", p.Name, err)
+		}
+
+		safeName := sanitizeFilename(p.Name)
+		safeTournament := sanitizeFilename(tournament.Name)
+		filename := fmt.Sprintf("%s_%s_certificate.pdf", safeTournament, safeName)
+
+		certificates = append(certificates, PDFExportResponse{
+			Format:   FormatPDF,
+			Filename: filename,
+			Content:  pdfBytes,
+			MimeType: FormatPDF.GetMimeType(),
+		})
+	}
+
+	return certificates, nil
+}

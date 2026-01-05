@@ -16,11 +16,13 @@ import (
 )
 
 var (
-	ErrUserNotFound       = errors.New("user not found")
-	ErrUserExists         = errors.New("user already exists")
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrTokenRevoked       = errors.New("token has been revoked")
-	ErrInvalidResetToken  = errors.New("invalid or expired reset token")
+	ErrUserNotFound              = errors.New("user not found")
+	ErrUserExists                = errors.New("user already exists")
+	ErrInvalidCredentials        = errors.New("invalid credentials")
+	ErrTokenRevoked              = errors.New("token has been revoked")
+	ErrInvalidResetToken         = errors.New("invalid or expired reset token")
+	ErrInvalidVerificationToken  = errors.New("invalid or expired verification token")
+	ErrEmailAlreadyVerified      = errors.New("email already verified")
 )
 
 // User represents a user in the system
@@ -61,6 +63,7 @@ type TokenPair struct {
 // EmailSender interface for sending emails
 type EmailSender interface {
 	SendPasswordReset(ctx context.Context, to, recipientName, resetLink string) error
+	SendEmailVerification(ctx context.Context, to, recipientName, verificationLink string) error
 }
 
 // Service handles authentication operations
@@ -141,8 +144,146 @@ func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*User, er
 		return nil, err
 	}
 
+	// Send verification email
+	if s.emailService != nil {
+		go func() {
+			ctx := context.Background()
+			_ = s.sendVerificationEmail(ctx, userID, req.Email, req.FirstName)
+		}()
+	}
+
 	log.Info().Str("user_id", userID).Str("email", req.Email).Msg("User registered")
 	return user, nil
+}
+
+// sendVerificationEmail creates a verification token and sends email
+func (s *Service) sendVerificationEmail(ctx context.Context, userID, email, firstName string) error {
+	// Generate verification token
+	token, err := GenerateRandomToken(32)
+	if err != nil {
+		return err
+	}
+
+	tokenHash := hashToken(token)
+	expiresAt := time.Now().Add(24 * time.Hour)
+
+	_, err = s.db.Exec(ctx, `
+		INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
+		VALUES ($1, $2, $3)
+	`, userID, tokenHash, expiresAt)
+	if err != nil {
+		log.Error().Err(err).Str("user_id", userID).Msg("Failed to create verification token")
+		return err
+	}
+
+	// Send verification email
+	recipientName := firstName
+	if recipientName == "" {
+		recipientName = "User"
+	}
+	verificationLink := s.appBaseURL + "/verify-email?token=" + token
+
+	if err := s.emailService.SendEmailVerification(ctx, email, recipientName, verificationLink); err != nil {
+		log.Error().Err(err).Str("email", email).Msg("Failed to send verification email")
+		return err
+	}
+
+	log.Info().Str("email", email).Msg("Verification email sent")
+	return nil
+}
+
+// ResendVerificationEmail resends verification email for a user
+func (s *Service) ResendVerificationEmail(ctx context.Context, userID string) error {
+	// Get user info
+	var email, firstName string
+	var emailVerified bool
+	err := s.db.QueryRow(ctx, `
+		SELECT u.email, u.email_verified, COALESCE(p.first_name, '')
+		FROM users u
+		LEFT JOIN players p ON p.user_id = u.id
+		WHERE u.id = $1
+	`, userID).Scan(&email, &emailVerified, &firstName)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUserNotFound
+		}
+		return err
+	}
+
+	if emailVerified {
+		return ErrEmailAlreadyVerified
+	}
+
+	// Invalidate existing tokens
+	_, _ = s.db.Exec(ctx, `
+		UPDATE email_verification_tokens SET used_at = NOW()
+		WHERE user_id = $1 AND used_at IS NULL
+	`, userID)
+
+	return s.sendVerificationEmail(ctx, userID, email, firstName)
+}
+
+// VerifyEmail verifies a user's email using a verification token
+func (s *Service) VerifyEmail(ctx context.Context, token string) error {
+	tokenHash := hashToken(token)
+
+	// Get and validate token
+	var userID string
+	var expiresAt time.Time
+	var usedAt *time.Time
+	err := s.db.QueryRow(ctx, `
+		SELECT user_id, expires_at, used_at FROM email_verification_tokens
+		WHERE token_hash = $1
+	`, tokenHash).Scan(&userID, &expiresAt, &usedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvalidVerificationToken
+		}
+		return err
+	}
+
+	if usedAt != nil || time.Now().After(expiresAt) {
+		return ErrInvalidVerificationToken
+	}
+
+	// Check if already verified
+	var emailVerified bool
+	err = s.db.QueryRow(ctx, "SELECT email_verified FROM users WHERE id = $1", userID).Scan(&emailVerified)
+	if err != nil {
+		return err
+	}
+	if emailVerified {
+		return ErrEmailAlreadyVerified
+	}
+
+	// Start transaction
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Update user as verified
+	_, err = tx.Exec(ctx, `
+		UPDATE users SET email_verified = TRUE, email_verified_at = NOW(), updated_at = NOW()
+		WHERE id = $1
+	`, userID)
+	if err != nil {
+		return err
+	}
+
+	// Mark token as used
+	_, err = tx.Exec(ctx, "UPDATE email_verification_tokens SET used_at = NOW() WHERE token_hash = $1", tokenHash)
+	if err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	log.Info().Str("user_id", userID).Msg("Email verified successfully")
+	return nil
 }
 
 // Login authenticates a user and returns tokens

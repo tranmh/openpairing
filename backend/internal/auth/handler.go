@@ -294,3 +294,77 @@ func (h *Handler) GetCurrentUser(c *gin.Context) {
 
 	response.Success(c, http.StatusOK, gin.H{"user": user})
 }
+
+// VerifyEmail godoc
+// @Summary Verify email address
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body object{token=string} true "Verification token"
+// @Success 200
+// @Failure 400 {object} response.Error
+// @Router /auth/verify-email [post]
+func (h *Handler) VerifyEmail(c *gin.Context) {
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+
+	if req.Token == "" {
+		response.BadRequest(c, "Verification token is required")
+		return
+	}
+
+	err := h.service.VerifyEmail(c.Request.Context(), req.Token)
+	if err != nil {
+		switch err {
+		case ErrInvalidVerificationToken:
+			response.BadRequest(c, "Invalid or expired verification token")
+		case ErrEmailAlreadyVerified:
+			response.BadRequest(c, "Email is already verified")
+		default:
+			response.InternalServerError(c, "Failed to verify email")
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, gin.H{
+		"message": "Email verified successfully",
+	})
+}
+
+// ResendVerificationEmail godoc
+// @Summary Resend verification email
+// @Tags auth
+// @Security BearerAuth
+// @Produce json
+// @Success 200
+// @Failure 400 {object} response.Error
+// @Router /auth/resend-verification [post]
+func (h *Handler) ResendVerificationEmail(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		response.Unauthorized(c, "Not authenticated")
+		return
+	}
+
+	err := h.service.ResendVerificationEmail(c.Request.Context(), userID.(string))
+	if err != nil {
+		switch err {
+		case ErrUserNotFound:
+			response.NotFound(c, "User not found")
+		case ErrEmailAlreadyVerified:
+			response.BadRequest(c, "Email is already verified")
+		default:
+			response.InternalServerError(c, "Failed to send verification email")
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, gin.H{
+		"message": "Verification email sent",
+	})
+}
