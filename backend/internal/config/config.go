@@ -98,6 +98,13 @@ type FederationConfig struct {
 	DSBAPIKey        string
 	OESBAPIKey       string
 	SSBAPIKey        string
+
+	// Portal64 integration (alternative DSB data source)
+	DSBProvider        string        // "portal64" or "dewis" (default: "portal64")
+	Portal64BaseURL    string        // Portal64 API base URL
+	Portal64Timeout    time.Duration // HTTP timeout
+	Portal64CacheTTL   time.Duration // Player cache TTL
+	Portal64SearchTTL  time.Duration // Search results cache TTL
 }
 
 type PairingConfig struct {
@@ -164,6 +171,13 @@ func Load() *Config {
 			DSBAPIKey:        getEnv("FEDERATION_DSB_API_KEY", ""),
 			OESBAPIKey:       getEnv("FEDERATION_OESB_API_KEY", ""),
 			SSBAPIKey:        getEnv("FEDERATION_SSB_API_KEY", ""),
+
+			// Portal64 integration
+			DSBProvider:       getEnv("FEDERATION_DSB_PROVIDER", "portal64"),
+			Portal64BaseURL:   getEnv("FEDERATION_PORTAL64_BASE_URL", "https://test.svw.info:8080"),
+			Portal64Timeout:   getDurationEnv("FEDERATION_PORTAL64_TIMEOUT", 30*time.Second),
+			Portal64CacheTTL:  getDurationEnv("FEDERATION_PORTAL64_CACHE_TTL", 1*time.Hour),
+			Portal64SearchTTL: getDurationEnv("FEDERATION_PORTAL64_SEARCH_TTL", 15*time.Minute),
 		},
 		Pairing: PairingConfig{
 			JaVaFoPath: getEnv("JAVAFO_PATH", ""),

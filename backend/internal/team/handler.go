@@ -51,29 +51,30 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 	tournaments.Use(authMiddleware)
 	{
 		// Team registration
-		tournaments.GET("/:id/teams", h.GetTournamentTeams)
-		tournaments.POST("/:id/teams", h.RegisterTeam)
-		tournaments.DELETE("/:id/teams/:teamParticipantId", h.WithdrawTeam)
+		// Team registration routes - moved to team_tournament package
+		// tournaments.GET("/:id/teams", h.GetTournamentTeams)
+		// tournaments.POST("/:id/teams", h.RegisterTeam)
+		// tournaments.DELETE("/:id/teams/:teamParticipantId", h.WithdrawTeam)
 
-		// Lineups
-		tournaments.GET("/:id/rounds/:roundId/lineups", h.GetLineupsForRound)
-		tournaments.GET("/:id/rounds/:roundId/lineups/:teamParticipantId", h.GetLineup)
-		tournaments.PUT("/:id/rounds/:roundId/lineups/:teamParticipantId", h.SubmitLineup)
+		// Lineups - moved to team_tournament package to avoid route conflicts
+		// tournaments.GET("/:id/rounds/:round/lineups", h.GetLineupsForRound)
+		// tournaments.GET("/:id/rounds/:round/lineups/:teamParticipantId", h.GetLineup)
+		// tournaments.PUT("/:id/rounds/:round/lineups/:teamParticipantId", h.SubmitLineup)
 
-		// Team matches
-		tournaments.GET("/:id/matches", h.GetTournamentMatches)
-		tournaments.GET("/:id/rounds/:roundId/matches", h.GetRoundMatches)
-		tournaments.GET("/:id/matches/:matchId", h.GetMatch)
-		tournaments.GET("/:id/matches/:matchId/boards", h.GetMatchBoards)
-		tournaments.PUT("/:id/matches/:matchId/boards/:boardId", h.EnterBoardResult)
-		tournaments.POST("/:id/matches/:matchId/calculate", h.CalculateMatchResult)
+		// Team matches - using team_tournament routes instead
+		// tournaments.GET("/:id/matches", h.GetTournamentMatches)
+		// tournaments.GET("/:id/rounds/:round/matches", h.GetRoundMatches)
+		// tournaments.GET("/:id/matches/:matchId", h.GetMatch)
+		// tournaments.GET("/:id/matches/:matchId/boards", h.GetMatchBoards)
+		// tournaments.PUT("/:id/matches/:matchId/boards/:boardId", h.EnterBoardResult)
+		// tournaments.POST("/:id/matches/:matchId/calculate", h.CalculateMatchResult)
 
-		// Standings
-		tournaments.GET("/:id/team-standings", h.GetTeamStandings)
+		// Standings - using team_tournament routes instead
+		// tournaments.GET("/:id/team-standings", h.GetTeamStandings)
 
-		// Settings
-		tournaments.GET("/:id/team-settings", h.GetTeamSettings)
-		tournaments.PUT("/:id/team-settings", h.UpdateTeamSettings)
+		// Settings - moved to team_tournament package
+		// tournaments.GET("/:id/team-settings", h.GetTeamSettings)
+		// tournaments.PUT("/:id/team-settings", h.UpdateTeamSettings)
 	}
 }
 
@@ -327,7 +328,7 @@ func (h *Handler) WithdrawTeam(c *gin.Context) {
 
 // GetLineupsForRound retrieves all lineups for a round
 func (h *Handler) GetLineupsForRound(c *gin.Context) {
-	roundID, err := uuid.Parse(c.Param("roundId"))
+	roundID, err := uuid.Parse(c.Param("round"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid round ID"})
 		return
@@ -344,7 +345,7 @@ func (h *Handler) GetLineupsForRound(c *gin.Context) {
 
 // GetLineup retrieves a team's lineup for a round
 func (h *Handler) GetLineup(c *gin.Context) {
-	roundID, err := uuid.Parse(c.Param("roundId"))
+	roundID, err := uuid.Parse(c.Param("round"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid round ID"})
 		return
@@ -377,7 +378,7 @@ func (h *Handler) SubmitLineup(c *gin.Context) {
 		return
 	}
 
-	roundID, err := uuid.Parse(c.Param("roundId"))
+	roundID, err := uuid.Parse(c.Param("round"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid round ID"})
 		return
@@ -427,7 +428,7 @@ func (h *Handler) GetTournamentMatches(c *gin.Context) {
 
 // GetRoundMatches retrieves all team matches for a round
 func (h *Handler) GetRoundMatches(c *gin.Context) {
-	roundID, err := uuid.Parse(c.Param("roundId"))
+	roundID, err := uuid.Parse(c.Param("round"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid round ID"})
 		return

@@ -919,9 +919,24 @@ type UpdateTournamentRequest struct {
 
 // RegisterParticipantRequest is the request for registering a participant
 type RegisterParticipantRequest struct {
-	PlayerID       uuid.UUID  `json:"playerId" binding:"required"`
+	PlayerID       uuid.UUID  `json:"playerId"`
 	SectionID      *uuid.UUID `json:"sectionId,omitempty"`
 	StartingRating int        `json:"startingRating,omitempty"`
+
+	// Federation import fields - used when player doesn't exist locally
+	DsbID  string `json:"dsbId,omitempty"`  // PKZ for importing from DSB/portal64
+	OesbID string `json:"oesbId,omitempty"` // OESB ID for importing from Austrian federation
+	SsbID  string `json:"ssbId,omitempty"`  // SSB ID for importing from Swiss federation
+
+	// Manual entry fields - fallback when federation APIs unavailable
+	ManualEntry     bool    `json:"manualEntry,omitempty"`
+	ManualFirstName string  `json:"manualFirstName,omitempty"`
+	ManualLastName  string  `json:"manualLastName,omitempty"`
+	ManualDWZ       *int    `json:"manualDwz,omitempty"`
+	ManualFideID    string  `json:"manualFideId,omitempty"`
+	ManualClub      string  `json:"manualClub,omitempty"`
+	ManualBirthYear *int    `json:"manualBirthYear,omitempty"`
+	ManualGender    string  `json:"manualGender,omitempty"`
 }
 
 // DefaultTiebreaks returns the default tiebreak order

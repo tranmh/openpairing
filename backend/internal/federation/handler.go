@@ -2,6 +2,7 @@ package federation
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/openpairing/openpairing/internal/federation/dsb"
 	"github.com/openpairing/openpairing/internal/federation/fide"
 	"github.com/openpairing/openpairing/internal/federation/oesb"
+	"github.com/openpairing/openpairing/internal/federation/portal64"
 	"github.com/openpairing/openpairing/internal/federation/ssb"
 	"github.com/openpairing/openpairing/internal/player"
 	"github.com/openpairing/openpairing/pkg/response"
@@ -18,44 +20,55 @@ import (
 
 // Handler handles federation-related HTTP requests
 type Handler struct {
-	fideImporter *fide.Importer
-	fideScheduler *fide.Scheduler
-	dsbImporter  *dsb.Importer
-	dsbScheduler *dsb.Scheduler
-	oesbImporter *oesb.Importer
-	oesbScheduler *oesb.Scheduler
-	ssbImporter  *ssb.Importer
-	ssbScheduler *ssb.Scheduler
-	playerRepo   player.Repository
-	logger       zerolog.Logger
+	fideImporter    *fide.Importer
+	fideScheduler   *fide.Scheduler
+	dsbImporter     *dsb.Importer
+	dsbScheduler    *dsb.Scheduler
+	portal64Service *portal64.Service
+	dsbProvider     string // "portal64" or "dewis"
+	oesbImporter    *oesb.Importer
+	oesbScheduler   *oesb.Scheduler
+	ssbImporter     *ssb.Importer
+	ssbScheduler    *ssb.Scheduler
+	playerRepo      player.Repository
+	logger          zerolog.Logger
 }
 
 // HandlerConfig contains configuration for the federation handler
 type HandlerConfig struct {
-	FideImporter  *fide.Importer
-	FideScheduler *fide.Scheduler
-	DSBImporter   *dsb.Importer
-	DSBScheduler  *dsb.Scheduler
-	OESBImporter  *oesb.Importer
-	OESBScheduler *oesb.Scheduler
-	SSBImporter   *ssb.Importer
-	SSBScheduler  *ssb.Scheduler
-	PlayerRepo    player.Repository
+	FideImporter    *fide.Importer
+	FideScheduler   *fide.Scheduler
+	DSBImporter     *dsb.Importer
+	DSBScheduler    *dsb.Scheduler
+	Portal64Service *portal64.Service
+	DSBProvider     string // "portal64" or "dewis" (default: "portal64")
+	OESBImporter    *oesb.Importer
+	OESBScheduler   *oesb.Scheduler
+	SSBImporter     *ssb.Importer
+	SSBScheduler    *ssb.Scheduler
+	PlayerRepo      player.Repository
 }
 
 // NewHandler creates a new federation handler
 func NewHandler(cfg *HandlerConfig, logger zerolog.Logger) *Handler {
+	dsbProvider := cfg.DSBProvider
+	if dsbProvider == "" {
+		dsbProvider = "portal64" // default to portal64
+	}
+
 	return &Handler{
-		fideImporter:  cfg.FideImporter,
-		fideScheduler: cfg.FideScheduler,
-		dsbImporter:   cfg.DSBImporter,
-		dsbScheduler:  cfg.DSBScheduler,
-		oesbImporter:  cfg.OESBImporter,
-		oesbScheduler: cfg.OESBScheduler,
-		ssbImporter:   cfg.SSBImporter,
-		ssbScheduler:  cfg.SSBScheduler,
-		playerRepo:    cfg.PlayerRepo,
-		logger:        logger.With().Str("component", "federation_handler").Logger(),
+		fideImporter:    cfg.FideImporter,
+		fideScheduler:   cfg.FideScheduler,
+		dsbImporter:     cfg.DSBImporter,
+		dsbScheduler:    cfg.DSBScheduler,
+		portal64Service: cfg.Portal64Service,
+		dsbProvider:     dsbProvider,
+		oesbImporter:    cfg.OESBImporter,
+		oesbScheduler:   cfg.OESBScheduler,
+		ssbImporter:     cfg.SSBImporter,
+		ssbScheduler:    cfg.SSBScheduler,
+		playerRepo:      cfg.PlayerRepo,
+		logger:          logger.With().Str("component", "federation_handler").Logger(),
 	}
 }
 
@@ -133,7 +146,7 @@ func (h *Handler) SearchFederation(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
-	var results []FederationPlayer
+	results := make([]FederationPlayer, 0)
 
 	// Search based on federation or all federations
 	switch req.Federation {
@@ -143,7 +156,31 @@ func (h *Handler) SearchFederation(c *gin.Context) {
 		return
 
 	case "dsb":
-		if h.dsbImporter != nil {
+		if h.dsbProvider == "portal64" && h.portal64Service != nil {
+			// Use portal64 API
+			players, err := h.portal64Service.SearchPlayers(ctx, req.Query, req.Limit)
+			if err != nil {
+				h.logger.Warn().Err(err).Msg("Portal64 DSB search failed")
+			} else {
+				for _, p := range players {
+					fideID := ""
+					if p.FideID > 0 {
+						fideID = fmt.Sprintf("%d", p.FideID)
+					}
+					results = append(results, FederationPlayer{
+						ID:         p.ID,  // Use VKZ-Spielernummer (e.g., "56024-173") for GetPlayer API
+						Name:       p.Name,
+						FirstName:  p.Firstname,
+						LastName:   p.Name,
+						Federation: "DSB",
+						Rating:     p.CurrentDWZ,
+						FideID:     fideID,
+						Club:       p.Club,
+					})
+				}
+			}
+		} else if h.dsbImporter != nil {
+			// Fallback to DeWIS API
 			dsbClient := dsb.NewClient(&dsb.ClientConfig{}, h.logger)
 			players, err := dsbClient.SearchPlayers(ctx, req.Query, req.Limit)
 			if err != nil {
@@ -216,7 +253,29 @@ func (h *Handler) SearchFederation(c *gin.Context) {
 
 	default:
 		// Search all DACH federations
-		if h.dsbImporter != nil {
+		if h.dsbProvider == "portal64" && h.portal64Service != nil {
+			// Use portal64 API for DSB
+			players, err := h.portal64Service.SearchPlayers(ctx, req.Query, req.Limit/3)
+			if err == nil {
+				for _, p := range players {
+					fideID := ""
+					if p.FideID > 0 {
+						fideID = fmt.Sprintf("%d", p.FideID)
+					}
+					results = append(results, FederationPlayer{
+						ID:         p.ID,  // Use VKZ-Spielernummer for GetPlayer API
+						Name:       p.Name,
+						FirstName:  p.Firstname,
+						LastName:   p.Name,
+						Federation: "DSB",
+						Rating:     p.CurrentDWZ,
+						FideID:     fideID,
+						Club:       p.Club,
+					})
+				}
+			}
+		} else if h.dsbImporter != nil {
+			// Fallback to DeWIS API
 			dsbClient := dsb.NewClient(&dsb.ClientConfig{}, h.logger)
 			players, err := dsbClient.SearchPlayers(ctx, req.Query, req.Limit/3)
 			if err == nil {
@@ -442,12 +501,31 @@ func (h *Handler) ImportDSBPlayer(c *gin.Context) {
 		return
 	}
 
+	ctx := c.Request.Context()
+
+	// Use portal64 if configured
+	if h.dsbProvider == "portal64" && h.portal64Service != nil {
+		player, err := h.portal64Service.ImportPlayer(ctx, pkz)
+		if err != nil {
+			h.logger.Warn().Err(err).Str("pkz", pkz).Msg("Portal64 player import failed")
+			response.NotFound(c, "Player not found or import failed")
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"player":  player,
+			"source":  "portal64",
+		})
+		return
+	}
+
+	// Fallback to DeWIS
 	if h.dsbImporter == nil {
 		response.BadRequest(c, "DSB importer not configured")
 		return
 	}
 
-	ctx := c.Request.Context()
 	player, err := h.dsbImporter.ImportPlayer(ctx, pkz)
 	if err != nil {
 		h.logger.Warn().Err(err).Str("pkz", pkz).Msg("DSB player import failed")

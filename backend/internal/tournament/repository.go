@@ -609,7 +609,7 @@ func (r *PostgresRepository) ListParticipants(ctx context.Context, tournamentID 
 	}
 	defer rows.Close()
 
-	var participants []Participant
+	participants := make([]Participant, 0)
 	for rows.Next() {
 		var p Participant
 		var byeRequestsJSON []byte

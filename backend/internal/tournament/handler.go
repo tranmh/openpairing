@@ -1,19 +1,25 @@
 package tournament
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/openpairing/openpairing/internal/federation/portal64"
+	"github.com/openpairing/openpairing/internal/player"
 	"github.com/rs/zerolog"
 )
 
 // Handler handles tournament HTTP requests
 type Handler struct {
-	service *Service
-	logger  zerolog.Logger
+	service         *Service
+	portal64Service *portal64.Service
+	playerRepo      player.Repository
+	logger          zerolog.Logger
 }
 
 // NewHandler creates a new tournament handler
@@ -21,6 +27,16 @@ func NewHandler(service *Service, logger zerolog.Logger) *Handler {
 	return &Handler{
 		service: service,
 		logger:  logger.With().Str("handler", "tournament").Logger(),
+	}
+}
+
+// NewHandlerWithImporter creates a tournament handler with player import support
+func NewHandlerWithImporter(service *Service, portal64Service *portal64.Service, playerRepo player.Repository, logger zerolog.Logger) *Handler {
+	return &Handler{
+		service:         service,
+		portal64Service: portal64Service,
+		playerRepo:      playerRepo,
+		logger:          logger.With().Str("handler", "tournament").Logger(),
 	}
 }
 
@@ -32,8 +48,9 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware gin.HandlerF
 		tournaments.GET("", h.ListTournaments)
 		tournaments.GET("/:id", h.GetTournament)
 		tournaments.GET("/slug/:slug", h.GetTournamentBySlug)
-		tournaments.GET("/:id/standings", h.GetStandings)
-		tournaments.GET("/:id/crosstable", h.GetCrosstable)
+		// Note: standings and crosstable are registered via standingsHandler in main.go
+		// tournaments.GET("/:id/standings", h.GetStandings)
+		// tournaments.GET("/:id/crosstable", h.GetCrosstable)
 		tournaments.GET("/:id/rounds", h.GetRounds)
 		tournaments.GET("/:id/rounds/:round/pairings", h.GetPairings)
 		tournaments.GET("/:id/export/trf", h.ExportTRF)
@@ -429,13 +446,97 @@ func (h *Handler) RegisterParticipant(c *gin.Context) {
 		return
 	}
 
-	participant, err := h.service.RegisterParticipant(c.Request.Context(), id, &req)
+	ctx := c.Request.Context()
+
+	// If PlayerID is not provided, try to import or create player
+	if req.PlayerID == uuid.Nil {
+		playerID, importErr := h.resolveOrImportPlayer(ctx, &req)
+		if importErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": importErr.Error()})
+			return
+		}
+		req.PlayerID = playerID
+	}
+
+	participant, err := h.service.RegisterParticipant(ctx, id, &req)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusCreated, ParticipantResponse{Participant: participant})
+}
+
+// resolveOrImportPlayer resolves an existing player or imports/creates one
+func (h *Handler) resolveOrImportPlayer(ctx context.Context, req *RegisterParticipantRequest) (uuid.UUID, error) {
+	// Try to import from DSB/portal64
+	if req.DsbID != "" && h.portal64Service != nil {
+		importedPlayer, err := h.portal64Service.ImportPlayer(ctx, req.DsbID)
+		if err == nil && importedPlayer != nil {
+			h.logger.Info().
+				Str("dsbId", req.DsbID).
+				Str("playerId", importedPlayer.ID.String()).
+				Msg("Player imported from portal64")
+			return importedPlayer.ID, nil
+		}
+		h.logger.Warn().Err(err).Str("dsbId", req.DsbID).Msg("Portal64 import failed")
+
+		// If import failed and manual entry not allowed, return error
+		if !req.ManualEntry {
+			return uuid.Nil, fmt.Errorf("failed to import player from federation: %w", err)
+		}
+	}
+
+	// Manual entry fallback
+	if req.ManualEntry {
+		if req.ManualFirstName == "" || req.ManualLastName == "" {
+			return uuid.Nil, fmt.Errorf("manual entry requires firstName and lastName")
+		}
+
+		if h.playerRepo == nil {
+			return uuid.Nil, fmt.Errorf("player repository not available for manual entry")
+		}
+
+		// Create manual player entry
+		manualPlayer := &player.Player{
+			ID:        uuid.New(),
+			FirstName: req.ManualFirstName,
+			LastName:  req.ManualLastName,
+		}
+
+		if req.ManualDWZ != nil {
+			manualPlayer.DWZ = req.ManualDWZ
+		}
+		if req.ManualFideID != "" {
+			manualPlayer.FideID = &req.ManualFideID
+		}
+		if req.ManualClub != "" {
+			manualPlayer.ClubName = &req.ManualClub
+		}
+		if req.ManualBirthYear != nil {
+			birthDate := fmt.Sprintf("%d-01-01", *req.ManualBirthYear)
+			manualPlayer.BirthDate = &birthDate
+		}
+		if req.ManualGender != "" {
+			manualPlayer.Gender = &req.ManualGender
+		}
+		if req.DsbID != "" {
+			manualPlayer.DsbID = &req.DsbID
+		}
+
+		if err := h.playerRepo.Create(ctx, manualPlayer); err != nil {
+			return uuid.Nil, fmt.Errorf("failed to create manual player: %w", err)
+		}
+
+		h.logger.Info().
+			Str("playerId", manualPlayer.ID.String()).
+			Str("name", manualPlayer.FirstName+" "+manualPlayer.LastName).
+			Msg("Manual player entry created")
+
+		return manualPlayer.ID, nil
+	}
+
+	return uuid.Nil, fmt.Errorf("playerId required, or provide dsbId for import, or enable manualEntry")
 }
 
 // WithdrawParticipant withdraws a participant

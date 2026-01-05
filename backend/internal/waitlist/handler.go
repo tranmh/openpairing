@@ -26,7 +26,7 @@ func NewHandler(service *Service, logger zerolog.Logger) *Handler {
 
 // RegisterRoutes registers waitlist routes
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware, organizerMiddleware gin.HandlerFunc) {
-	waitlist := r.Group("/tournaments/:tournamentId/waitlist")
+	waitlist := r.Group("/tournaments/:id/waitlist")
 	{
 		// Public route - view waitlist
 		waitlist.GET("", h.GetWaitlist)
@@ -58,7 +58,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, authMiddleware, organizerMi
 // @Success 200 {object} WaitlistListResponse
 // @Router /tournaments/{tournamentId}/waitlist [get]
 func (h *Handler) GetWaitlist(c *gin.Context) {
-	tournamentID, err := uuid.Parse(c.Param("tournamentId"))
+	tournamentID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		response.BadRequest(c, "Invalid tournament ID")
 		return
@@ -87,7 +87,7 @@ func (h *Handler) GetWaitlist(c *gin.Context) {
 // @Failure 409 {object} response.Error
 // @Router /tournaments/{tournamentId}/waitlist [post]
 func (h *Handler) AddToWaitlist(c *gin.Context) {
-	tournamentID, err := uuid.Parse(c.Param("tournamentId"))
+	tournamentID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		response.BadRequest(c, "Invalid tournament ID")
 		return
@@ -127,7 +127,7 @@ func (h *Handler) AddToWaitlist(c *gin.Context) {
 // @Failure 404 {object} response.Error
 // @Router /tournaments/{tournamentId}/waitlist/position [get]
 func (h *Handler) GetPosition(c *gin.Context) {
-	tournamentID, err := uuid.Parse(c.Param("tournamentId"))
+	tournamentID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		response.BadRequest(c, "Invalid tournament ID")
 		return
@@ -199,7 +199,7 @@ func (h *Handler) RemoveFromWaitlist(c *gin.Context) {
 // @Success 200 {object} WaitlistEntry
 // @Router /tournaments/{tournamentId}/waitlist/promote [post]
 func (h *Handler) PromoteNext(c *gin.Context) {
-	tournamentID, err := uuid.Parse(c.Param("tournamentId"))
+	tournamentID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		response.BadRequest(c, "Invalid tournament ID")
 		return

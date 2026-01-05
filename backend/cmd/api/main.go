@@ -20,6 +20,7 @@ import (
 	"github.com/openpairing/openpairing/internal/federation/dsb"
 	"github.com/openpairing/openpairing/internal/federation/fide"
 	"github.com/openpairing/openpairing/internal/federation/oesb"
+	"github.com/openpairing/openpairing/internal/federation/portal64"
 	"github.com/openpairing/openpairing/internal/federation/ssb"
 	"github.com/openpairing/openpairing/internal/fairplay"
 	"github.com/openpairing/openpairing/internal/gameaction"
@@ -96,6 +97,20 @@ func main() {
 	}, log.Logger)
 	dsbScheduler := dsb.NewScheduler(dsbImporter, cfg.Federation.DSBSyncInterval, log.Logger)
 
+	// Portal64 service (alternative DSB data source)
+	portal64Service := portal64.NewService(playerRepo, &portal64.ServiceConfig{
+		BaseURL:        cfg.Federation.Portal64BaseURL,
+		Timeout:        cfg.Federation.Portal64Timeout,
+		PlayerCacheTTL: cfg.Federation.Portal64CacheTTL,
+		SearchCacheTTL: cfg.Federation.Portal64SearchTTL,
+	}, log.Logger)
+
+	// Log which DSB provider is active
+	log.Info().
+		Str("dsb_provider", cfg.Federation.DSBProvider).
+		Str("portal64_url", cfg.Federation.Portal64BaseURL).
+		Msg("DSB data source configured")
+
 	oesbImporter := oesb.NewImporter(playerRepo, &oesb.ImporterConfig{
 		BatchSize: 100,
 		Workers:   4,
@@ -109,15 +124,17 @@ func main() {
 	ssbScheduler := ssb.NewScheduler(ssbImporter, cfg.Federation.SSBSyncInterval, log.Logger)
 
 	federationHandler := federation.NewHandler(&federation.HandlerConfig{
-		FideImporter:  fideImporter,
-		FideScheduler: fideScheduler,
-		DSBImporter:   dsbImporter,
-		DSBScheduler:  dsbScheduler,
-		OESBImporter:  oesbImporter,
-		OESBScheduler: oesbScheduler,
-		SSBImporter:   ssbImporter,
-		SSBScheduler:  ssbScheduler,
-		PlayerRepo:    playerRepo,
+		FideImporter:    fideImporter,
+		FideScheduler:   fideScheduler,
+		DSBImporter:     dsbImporter,
+		DSBScheduler:    dsbScheduler,
+		Portal64Service: portal64Service,
+		DSBProvider:     cfg.Federation.DSBProvider,
+		OESBImporter:    oesbImporter,
+		OESBScheduler:   oesbScheduler,
+		SSBImporter:     ssbImporter,
+		SSBScheduler:    ssbScheduler,
+		PlayerRepo:      playerRepo,
 	}, log.Logger)
 
 	// Analytics service
@@ -150,7 +167,7 @@ func main() {
 	}
 
 	tournamentService := tournament.NewServiceWithRegistry(tournamentRepo, engineRegistry, log.Logger)
-	tournamentHandler := tournament.NewHandler(tournamentService, log.Logger)
+	tournamentHandler := tournament.NewHandlerWithImporter(tournamentService, portal64Service, playerRepo, log.Logger)
 
 	// Arbiter service
 	arbiterRepo := arbiter.NewRepository(db.Pool)
