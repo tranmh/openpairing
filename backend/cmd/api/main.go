@@ -10,20 +10,23 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/openpairing/openpairing/internal/analytics"
+	"github.com/openpairing/openpairing/internal/arbiter"
 	"github.com/openpairing/openpairing/internal/auth"
 	"github.com/openpairing/openpairing/internal/config"
 	"github.com/openpairing/openpairing/internal/database"
+	"github.com/openpairing/openpairing/internal/export"
 	"github.com/openpairing/openpairing/internal/federation"
 	"github.com/openpairing/openpairing/internal/federation/dsb"
 	"github.com/openpairing/openpairing/internal/federation/fide"
 	"github.com/openpairing/openpairing/internal/federation/oesb"
 	"github.com/openpairing/openpairing/internal/federation/ssb"
 	"github.com/openpairing/openpairing/internal/middleware"
-	"github.com/openpairing/openpairing/internal/arbiter"
 	"github.com/openpairing/openpairing/internal/notification"
 	"github.com/openpairing/openpairing/internal/pairing/engine"
 	"github.com/openpairing/openpairing/internal/player"
 	"github.com/openpairing/openpairing/internal/reports"
+	"github.com/openpairing/openpairing/internal/result"
+	"github.com/openpairing/openpairing/internal/standings"
 	"github.com/openpairing/openpairing/internal/tournament"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -149,6 +152,21 @@ func main() {
 	normReportService := reports.NewNormReportService(reportsDataProvider)
 	reportsHandler := reports.NewHandler(dwzReportService, normReportService, trfReportService, log.Logger)
 
+	// Export service
+	exportRepo := export.NewRepository(db.Pool)
+	exportService := export.NewService(exportRepo)
+	exportHandler := export.NewHandler(exportService)
+
+	// Standings service
+	standingsRepo := standings.NewRepository(db.Pool)
+	standingsService := standings.NewService(standingsRepo)
+	standingsHandler := standings.NewHandler(standingsService)
+
+	// Result service
+	resultRepo := result.NewRepository(db.Pool)
+	resultService := result.NewService(resultRepo)
+	resultHandler := result.NewHandler(resultService)
+
 	// Configure rate limiting
 	middleware.RateLimitEnabled = cfg.RateLimit.Enabled
 	if !cfg.RateLimit.Enabled {
@@ -156,7 +174,7 @@ func main() {
 	}
 
 	// Create Gin router
-	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler)
+	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler, exportHandler, standingsHandler, resultHandler)
 
 	// Create server
 	srv := &http.Server{
@@ -210,7 +228,7 @@ func main() {
 	log.Info().Msg("Server exited")
 }
 
-func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler, reportsHandler *reports.Handler) *gin.Engine {
+func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler, reportsHandler *reports.Handler, exportHandler *export.Handler, standingsHandler *standings.Handler, resultHandler *result.Handler) *gin.Engine {
 	// Set Gin mode
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -304,12 +322,51 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 		games := v1.Group("/games")
 		games.Use(middleware.APIRateLimit())
 		{
-			games.GET("/:id", notImplemented)
+			games.GET("/:id", resultHandler.GetGame)
+			games.GET("/:id/audit", resultHandler.GetResultAuditLog)
+			games.GET("/:id/export/pgn", exportHandler.ExportGamePGN)
 			games.POST("/:id/resign", authMiddleware.Authenticate(), notImplemented)
 			games.POST("/:id/draw-offer", authMiddleware.Authenticate(), notImplemented)
 			games.POST("/:id/abort", authMiddleware.Authenticate(), notImplemented)
 			games.POST("/:id/call-arbiter", authMiddleware.Authenticate(), notImplemented)
 		}
+
+		// Result management routes
+		results := v1.Group("/results")
+		results.Use(middleware.APIRateLimit())
+		{
+			results.POST("", authMiddleware.Authenticate(), resultHandler.EnterResult)
+			results.POST("/correct", authMiddleware.Authenticate(), resultHandler.CorrectResult)
+			results.POST("/bulk", authMiddleware.Authenticate(), resultHandler.EnterBulkResults)
+			results.POST("/validate", resultHandler.ValidateResult)
+			results.DELETE("/:id", authMiddleware.Authenticate(), resultHandler.DeleteResult)
+		}
+
+		// Export routes (additional tournament exports)
+		exports := v1.Group("/tournaments/:id/export")
+		exports.Use(middleware.APIRateLimit())
+		{
+			exports.GET("/pgn", exportHandler.ExportTournamentPGN)
+			exports.GET("/json", exportHandler.ExportTournamentJSON)
+			exports.GET("/standings", exportHandler.ExportStandingsCSV)
+			exports.GET("/crosstable", exportHandler.ExportCrosstableCSV)
+		}
+
+		// Round exports
+		v1.GET("/tournaments/:id/rounds/:round/export/pgn", middleware.APIRateLimit(), exportHandler.ExportRoundPGN)
+
+		// Standings routes
+		v1.GET("/tournaments/:id/standings", middleware.APIRateLimit(), standingsHandler.GetStandings)
+		v1.GET("/tournaments/:id/crosstable", middleware.APIRateLimit(), standingsHandler.GetCrosstable)
+		v1.POST("/tournaments/:id/standings/recalculate", middleware.APIRateLimit(), authMiddleware.Authenticate(), standingsHandler.RecalculateStandings)
+		v1.GET("/tournaments/:id/participants/:participantId/progress", middleware.APIRateLimit(), standingsHandler.GetPlayerProgress)
+
+		// Round games and status
+		v1.GET("/tournaments/:id/rounds/:round/games", middleware.APIRateLimit(), resultHandler.GetRoundGames)
+		v1.GET("/tournaments/:id/rounds/:round/status", middleware.APIRateLimit(), resultHandler.GetRoundStatus)
+
+		// Tiebreaks reference
+		v1.GET("/tiebreaks", middleware.APIRateLimit(), standingsHandler.GetAvailableTiebreaks)
 	}
 
 	return router
