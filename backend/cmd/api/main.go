@@ -20,6 +20,8 @@ import (
 	"github.com/openpairing/openpairing/internal/federation/fide"
 	"github.com/openpairing/openpairing/internal/federation/oesb"
 	"github.com/openpairing/openpairing/internal/federation/ssb"
+	"github.com/openpairing/openpairing/internal/fairplay"
+	"github.com/openpairing/openpairing/internal/gameaction"
 	"github.com/openpairing/openpairing/internal/middleware"
 	"github.com/openpairing/openpairing/internal/notification"
 	"github.com/openpairing/openpairing/internal/organization"
@@ -30,6 +32,7 @@ import (
 	"github.com/openpairing/openpairing/internal/standings"
 	"github.com/openpairing/openpairing/internal/team"
 	"github.com/openpairing/openpairing/internal/tournament"
+	"github.com/openpairing/openpairing/internal/user"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -179,6 +182,21 @@ func main() {
 	teamService := team.NewService(teamRepo, log.Logger)
 	teamHandler := team.NewHandler(teamService, log.Logger)
 
+	// User service
+	userRepo := user.NewRepository(db.Pool)
+	userService := user.NewService(userRepo, log.Logger)
+	userHandler := user.NewHandler(userService, log.Logger)
+
+	// Game action service (resign, draw, abort, arbiter call)
+	gameActionRepo := gameaction.NewRepository(db.Pool)
+	gameActionService := gameaction.NewService(gameActionRepo, log.Logger)
+	gameActionHandler := gameaction.NewHandler(gameActionService, log.Logger)
+
+	// Fairplay service
+	fairplayRepo := fairplay.NewRepository(db.Pool)
+	fairplayService := fairplay.NewService(fairplayRepo, log.Logger)
+	fairplayHandler := fairplay.NewHandler(fairplayService, log.Logger)
+
 	// Configure rate limiting
 	middleware.RateLimitEnabled = cfg.RateLimit.Enabled
 	if !cfg.RateLimit.Enabled {
@@ -186,7 +204,7 @@ func main() {
 	}
 
 	// Create Gin router
-	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler, exportHandler, standingsHandler, resultHandler, organizationHandler, teamHandler)
+	router := setupRouter(cfg, authHandler, authMiddleware, playerHandler, federationHandler, analyticsHandler, notificationHandler, tournamentHandler, arbiterHandler, reportsHandler, exportHandler, standingsHandler, resultHandler, organizationHandler, teamHandler, userHandler, gameActionHandler, fairplayHandler)
 
 	// Create server
 	srv := &http.Server{
@@ -240,7 +258,7 @@ func main() {
 	log.Info().Msg("Server exited")
 }
 
-func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler, reportsHandler *reports.Handler, exportHandler *export.Handler, standingsHandler *standings.Handler, resultHandler *result.Handler, organizationHandler *organization.Handler, teamHandler *team.Handler) *gin.Engine {
+func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, playerHandler *player.Handler, federationHandler *federation.Handler, analyticsHandler *analytics.Handler, notificationHandler *notification.Handler, tournamentHandler *tournament.Handler, arbiterHandler *arbiter.Handler, reportsHandler *reports.Handler, exportHandler *export.Handler, standingsHandler *standings.Handler, resultHandler *result.Handler, organizationHandler *organization.Handler, teamHandler *team.Handler, userHandler *user.Handler, gameActionHandler *gameaction.Handler, fairplayHandler *fairplay.Handler) *gin.Engine {
 	// Set Gin mode
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -305,6 +323,12 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 		// Team routes (includes club teams)
 		teamHandler.RegisterRoutes(v1, authMiddleware.Authenticate())
 
+		// User profile routes
+		userHandler.RegisterRoutes(v1, authMiddleware.Authenticate())
+
+		// Fairplay routes
+		fairplayHandler.RegisterRoutes(v1, authMiddleware.Authenticate(), authMiddleware.RequireArbiter())
+
 		// Online games
 		games := v1.Group("/games")
 		games.Use(middleware.APIRateLimit())
@@ -312,10 +336,11 @@ func setupRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *
 			games.GET("/:id", resultHandler.GetGame)
 			games.GET("/:id/audit", resultHandler.GetResultAuditLog)
 			games.GET("/:id/export/pgn", exportHandler.ExportGamePGN)
-			games.POST("/:id/resign", authMiddleware.Authenticate(), notImplemented)
-			games.POST("/:id/draw-offer", authMiddleware.Authenticate(), notImplemented)
-			games.POST("/:id/abort", authMiddleware.Authenticate(), notImplemented)
-			games.POST("/:id/call-arbiter", authMiddleware.Authenticate(), notImplemented)
+			games.GET("/:id/draw-offer", gameActionHandler.GetDrawOfferStatus)
+			games.POST("/:id/resign", authMiddleware.Authenticate(), gameActionHandler.Resign)
+			games.POST("/:id/draw-offer", authMiddleware.Authenticate(), gameActionHandler.DrawOffer)
+			games.POST("/:id/abort", authMiddleware.Authenticate(), gameActionHandler.Abort)
+			games.POST("/:id/call-arbiter", authMiddleware.Authenticate(), gameActionHandler.CallArbiter)
 		}
 
 		// Result management routes
