@@ -473,9 +473,11 @@ func (h *Handler) GeneratePairings(c *gin.Context) {
 
 	userIDStr, _ := c.Get("user_id")
 	arbiterID, _ := uuid.Parse(userIDStr.(string))
+	userRole, _ := c.Get("user_role")
+	role, _ := userRole.(string)
 
 	// Verify arbiter has permission
-	if err := h.service.canManageTournament(c.Request.Context(), id, arbiterID); err != nil {
+	if err := h.service.CanManageTournamentWithRole(c.Request.Context(), id, arbiterID, role); err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
@@ -512,9 +514,11 @@ func (h *Handler) StartRound(c *gin.Context) {
 
 	userIDStr, _ := c.Get("user_id")
 	arbiterID, _ := uuid.Parse(userIDStr.(string))
+	userRole, _ := c.Get("user_role")
+	role, _ := userRole.(string)
 
 	// Verify arbiter has permission
-	if err := h.service.canManageTournament(c.Request.Context(), id, arbiterID); err != nil {
+	if err := h.service.CanManageTournamentWithRole(c.Request.Context(), id, arbiterID, role); err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
@@ -551,9 +555,11 @@ func (h *Handler) CompleteRound(c *gin.Context) {
 
 	userIDStr, _ := c.Get("user_id")
 	arbiterID, _ := uuid.Parse(userIDStr.(string))
+	userRole, _ := c.Get("user_role")
+	role, _ := userRole.(string)
 
 	// Verify arbiter has permission
-	if err := h.service.canManageTournament(c.Request.Context(), id, arbiterID); err != nil {
+	if err := h.service.CanManageTournamentWithRole(c.Request.Context(), id, arbiterID, role); err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}

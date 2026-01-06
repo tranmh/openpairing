@@ -38,12 +38,12 @@ func NewService(tournamentRepo tournament.Repository, playerRepo player.Reposito
 
 // canManageTournament checks if the arbiter has permission to manage the tournament
 func (s *Service) canManageTournament(ctx context.Context, tournamentID, arbiterID uuid.UUID) error {
-	return s.canManageTournamentWithRole(ctx, tournamentID, arbiterID, "")
+	return s.CanManageTournamentWithRole(ctx, tournamentID, arbiterID, "")
 }
 
-// canManageTournamentWithRole checks if the user has permission to manage the tournament
+// CanManageTournamentWithRole checks if the user has permission to manage the tournament
 // considering their role
-func (s *Service) canManageTournamentWithRole(ctx context.Context, tournamentID, arbiterID uuid.UUID, userRole string) error {
+func (s *Service) CanManageTournamentWithRole(ctx context.Context, tournamentID, arbiterID uuid.UUID, userRole string) error {
 	// Users with organizer or admin role can manage any tournament
 	if userRole == "organizer" || userRole == "admin" {
 		// Verify the tournament exists
@@ -140,7 +140,7 @@ func (s *Service) GetTournamentStatus(ctx context.Context, tournamentID uuid.UUI
 // GetTournamentStatusWithRole gets the current tournament status with role-based authorization
 func (s *Service) GetTournamentStatusWithRole(ctx context.Context, tournamentID uuid.UUID, arbiterID uuid.UUID, userRole string) (*TournamentStatus, error) {
 	// Verify user has permission for this tournament (considering role)
-	if err := s.canManageTournamentWithRole(ctx, tournamentID, arbiterID, userRole); err != nil {
+	if err := s.CanManageTournamentWithRole(ctx, tournamentID, arbiterID, userRole); err != nil {
 		return nil, err
 	}
 
