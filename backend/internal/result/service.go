@@ -39,33 +39,45 @@ func (s *Service) EnterResult(ctx context.Context, entry *ResultEntry) (*ResultE
 	// Parse the result into scores
 	whiteScore, blackScore := ParseResult(entry.Result)
 
+	// Start transaction to ensure atomicity
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	// Update the game result
-	err = s.repo.UpdateResult(ctx, entry.GameID, string(entry.Result), whiteScore, blackScore, entry.EnteredBy)
+	err = s.repo.UpdateResultWithTx(ctx, tx, entry.GameID, string(entry.Result), whiteScore, blackScore, entry.EnteredBy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update result: %w", err)
 	}
 
 	// Update participant statistics
 	if game.WhiteParticipantID != nil {
-		err = s.updateParticipantStats(ctx, *game.WhiteParticipantID, whiteScore)
+		err = s.updateParticipantStatsWithTx(ctx, tx, *game.WhiteParticipantID, whiteScore)
 		if err != nil {
 			return nil, fmt.Errorf("failed to update white participant stats: %w", err)
 		}
 	}
 	if game.BlackParticipantID != nil {
-		err = s.updateParticipantStats(ctx, *game.BlackParticipantID, blackScore)
+		err = s.updateParticipantStatsWithTx(ctx, tx, *game.BlackParticipantID, blackScore)
 		if err != nil {
 			return nil, fmt.Errorf("failed to update black participant stats: %w", err)
 		}
 	}
 
 	// Update round completion count
-	err = s.repo.UpdateRoundCompletedCount(ctx, game.RoundID)
+	err = s.repo.UpdateRoundCompletedCountWithTx(ctx, tx, game.RoundID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update round count: %w", err)
 	}
 
-	// Create audit log
+	// Commit the transaction
+	if err = tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Create audit log (outside transaction - non-critical)
 	newResult := string(entry.Result)
 	audit := &ResultAudit{
 		GameID:        entry.GameID,
@@ -109,44 +121,56 @@ func (s *Service) CorrectResult(ctx context.Context, correction *ResultCorrectio
 	oldWhiteScore := game.WhiteScore
 	oldBlackScore := game.BlackScore
 
+	// Parse the new result
+	newWhiteScore, newBlackScore := ParseResult(correction.NewResult)
+
+	// Start transaction to ensure atomicity
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	// Reverse the old result from participant stats
 	if game.WhiteParticipantID != nil && oldWhiteScore != nil {
-		err = s.reverseParticipantStats(ctx, *game.WhiteParticipantID, *oldWhiteScore)
+		err = s.reverseParticipantStatsWithTx(ctx, tx, *game.WhiteParticipantID, *oldWhiteScore)
 		if err != nil {
 			return nil, fmt.Errorf("failed to reverse white participant stats: %w", err)
 		}
 	}
 	if game.BlackParticipantID != nil && oldBlackScore != nil {
-		err = s.reverseParticipantStats(ctx, *game.BlackParticipantID, *oldBlackScore)
+		err = s.reverseParticipantStatsWithTx(ctx, tx, *game.BlackParticipantID, *oldBlackScore)
 		if err != nil {
 			return nil, fmt.Errorf("failed to reverse black participant stats: %w", err)
 		}
 	}
 
-	// Parse the new result
-	newWhiteScore, newBlackScore := ParseResult(correction.NewResult)
-
 	// Update the game result
-	err = s.repo.UpdateResult(ctx, correction.GameID, string(correction.NewResult), newWhiteScore, newBlackScore, correction.CorrectedBy)
+	err = s.repo.UpdateResultWithTx(ctx, tx, correction.GameID, string(correction.NewResult), newWhiteScore, newBlackScore, correction.CorrectedBy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update result: %w", err)
 	}
 
 	// Apply new result to participant stats
 	if game.WhiteParticipantID != nil {
-		err = s.updateParticipantStats(ctx, *game.WhiteParticipantID, newWhiteScore)
+		err = s.updateParticipantStatsWithTx(ctx, tx, *game.WhiteParticipantID, newWhiteScore)
 		if err != nil {
 			return nil, fmt.Errorf("failed to update white participant stats: %w", err)
 		}
 	}
 	if game.BlackParticipantID != nil {
-		err = s.updateParticipantStats(ctx, *game.BlackParticipantID, newBlackScore)
+		err = s.updateParticipantStatsWithTx(ctx, tx, *game.BlackParticipantID, newBlackScore)
 		if err != nil {
 			return nil, fmt.Errorf("failed to update black participant stats: %w", err)
 		}
 	}
 
-	// Create audit log
+	// Commit the transaction
+	if err = tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Create audit log (outside transaction - non-critical)
 	newResult := string(correction.NewResult)
 	audit := &ResultAudit{
 		GameID:        correction.GameID,
@@ -191,33 +215,45 @@ func (s *Service) DeleteResult(ctx context.Context, gameID uuid.UUID, deletedBy 
 	oldWhiteScore := game.WhiteScore
 	oldBlackScore := game.BlackScore
 
+	// Start transaction to ensure atomicity
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	// Reverse the result from participant stats
 	if game.WhiteParticipantID != nil && oldWhiteScore != nil {
-		err = s.reverseParticipantStats(ctx, *game.WhiteParticipantID, *oldWhiteScore)
+		err = s.reverseParticipantStatsWithTx(ctx, tx, *game.WhiteParticipantID, *oldWhiteScore)
 		if err != nil {
 			return fmt.Errorf("failed to reverse white participant stats: %w", err)
 		}
 	}
 	if game.BlackParticipantID != nil && oldBlackScore != nil {
-		err = s.reverseParticipantStats(ctx, *game.BlackParticipantID, *oldBlackScore)
+		err = s.reverseParticipantStatsWithTx(ctx, tx, *game.BlackParticipantID, *oldBlackScore)
 		if err != nil {
 			return fmt.Errorf("failed to reverse black participant stats: %w", err)
 		}
 	}
 
 	// Clear the result
-	err = s.repo.ClearResult(ctx, gameID)
+	err = s.repo.ClearResultWithTx(ctx, tx, gameID)
 	if err != nil {
 		return fmt.Errorf("failed to clear result: %w", err)
 	}
 
 	// Update round completion count
-	err = s.repo.UpdateRoundCompletedCount(ctx, game.RoundID)
+	err = s.repo.UpdateRoundCompletedCountWithTx(ctx, tx, game.RoundID)
 	if err != nil {
 		return fmt.Errorf("failed to update round count: %w", err)
 	}
 
-	// Create audit log
+	// Commit the transaction
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Create audit log (outside transaction - non-critical)
 	audit := &ResultAudit{
 		GameID:        gameID,
 		Action:        "deleted",
@@ -321,6 +357,10 @@ func (s *Service) RecalculateAllStats(ctx context.Context, tournamentID uuid.UUI
 // Helper functions
 
 func (s *Service) updateParticipantStats(ctx context.Context, participantID uuid.UUID, score float64) error {
+	return s.updateParticipantStatsWithTx(ctx, nil, participantID, score)
+}
+
+func (s *Service) updateParticipantStatsWithTx(ctx context.Context, q Querier, participantID uuid.UUID, score float64) error {
 	var winsDelta, drawsDelta, lossesDelta int
 	pointsDelta := int(score * 10) // Convert to tenths for integer arithmetic
 
@@ -333,10 +373,17 @@ func (s *Service) updateParticipantStats(ctx context.Context, participantID uuid
 		lossesDelta = 1
 	}
 
+	if q != nil {
+		return s.repo.UpdateParticipantStatsWithTx(ctx, q, participantID, pointsDelta, winsDelta, drawsDelta, lossesDelta)
+	}
 	return s.repo.UpdateParticipantStats(ctx, participantID, pointsDelta, winsDelta, drawsDelta, lossesDelta)
 }
 
 func (s *Service) reverseParticipantStats(ctx context.Context, participantID uuid.UUID, score float64) error {
+	return s.reverseParticipantStatsWithTx(ctx, nil, participantID, score)
+}
+
+func (s *Service) reverseParticipantStatsWithTx(ctx context.Context, q Querier, participantID uuid.UUID, score float64) error {
 	var winsDelta, drawsDelta, lossesDelta int
 	pointsDelta := -int(score * 10) // Negative to reverse
 
@@ -349,5 +396,8 @@ func (s *Service) reverseParticipantStats(ctx context.Context, participantID uui
 		lossesDelta = -1
 	}
 
+	if q != nil {
+		return s.repo.UpdateParticipantStatsWithTx(ctx, q, participantID, pointsDelta, winsDelta, drawsDelta, lossesDelta)
+	}
 	return s.repo.UpdateParticipantStats(ctx, participantID, pointsDelta, winsDelta, drawsDelta, lossesDelta)
 }

@@ -7,8 +7,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Querier interface for database operations - satisfied by both *pgxpool.Pool and pgx.Tx
+type Querier interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
 
 // Repository handles database operations for results
 type Repository struct {
@@ -18,6 +26,11 @@ type Repository struct {
 // NewRepository creates a new result repository
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
+}
+
+// BeginTx starts a new transaction
+func (r *Repository) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	return r.db.Begin(ctx)
 }
 
 // GetGame retrieves a game by ID
@@ -153,8 +166,13 @@ func (r *Repository) GetGameWithPlayers(ctx context.Context, gameID uuid.UUID) (
 
 // UpdateResult updates a game's result
 func (r *Repository) UpdateResult(ctx context.Context, gameID uuid.UUID, result string, whiteScore, blackScore float64, enteredBy uuid.UUID) error {
+	return r.UpdateResultWithTx(ctx, r.db, gameID, result, whiteScore, blackScore, enteredBy)
+}
+
+// UpdateResultWithTx updates a game's result within a transaction
+func (r *Repository) UpdateResultWithTx(ctx context.Context, q Querier, gameID uuid.UUID, result string, whiteScore, blackScore float64, enteredBy uuid.UUID) error {
 	now := time.Now()
-	_, err := r.db.Exec(ctx, `
+	_, err := q.Exec(ctx, `
 		UPDATE games
 		SET result = $2, white_score = $3, black_score = $4,
 		    result_entered_by = $5, result_entered_at = $6,
@@ -169,7 +187,12 @@ func (r *Repository) UpdateResult(ctx context.Context, gameID uuid.UUID, result 
 
 // ClearResult removes a game's result
 func (r *Repository) ClearResult(ctx context.Context, gameID uuid.UUID) error {
-	_, err := r.db.Exec(ctx, `
+	return r.ClearResultWithTx(ctx, r.db, gameID)
+}
+
+// ClearResultWithTx removes a game's result within a transaction
+func (r *Repository) ClearResultWithTx(ctx context.Context, q Querier, gameID uuid.UUID) error {
+	_, err := q.Exec(ctx, `
 		UPDATE games
 		SET result = NULL, white_score = NULL, black_score = NULL,
 		    result_entered_by = NULL, result_entered_at = NULL,
@@ -184,7 +207,12 @@ func (r *Repository) ClearResult(ctx context.Context, gameID uuid.UUID) error {
 
 // UpdateParticipantStats updates participant statistics after a result change
 func (r *Repository) UpdateParticipantStats(ctx context.Context, participantID uuid.UUID, pointsDelta, winsDelta, drawsDelta, lossesDelta int) error {
-	_, err := r.db.Exec(ctx, `
+	return r.UpdateParticipantStatsWithTx(ctx, r.db, participantID, pointsDelta, winsDelta, drawsDelta, lossesDelta)
+}
+
+// UpdateParticipantStatsWithTx updates participant statistics within a transaction
+func (r *Repository) UpdateParticipantStatsWithTx(ctx context.Context, q Querier, participantID uuid.UUID, pointsDelta, winsDelta, drawsDelta, lossesDelta int) error {
+	_, err := q.Exec(ctx, `
 		UPDATE tournament_participants
 		SET points = points + $2,
 		    wins = wins + $3,
@@ -396,7 +424,12 @@ func (r *Repository) GetAuditLog(ctx context.Context, gameID uuid.UUID) ([]Resul
 
 // UpdateRoundCompletedCount updates the completed game count for a round
 func (r *Repository) UpdateRoundCompletedCount(ctx context.Context, roundID uuid.UUID) error {
-	_, err := r.db.Exec(ctx, `
+	return r.UpdateRoundCompletedCountWithTx(ctx, r.db, roundID)
+}
+
+// UpdateRoundCompletedCountWithTx updates the completed game count within a transaction
+func (r *Repository) UpdateRoundCompletedCountWithTx(ctx context.Context, q Querier, roundID uuid.UUID) error {
+	_, err := q.Exec(ctx, `
 		UPDATE tournament_rounds tr
 		SET completed_count = (
 			SELECT COUNT(*) FROM games g

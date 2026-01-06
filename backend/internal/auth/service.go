@@ -334,12 +334,23 @@ func (s *Service) RefreshTokens(ctx context.Context, refreshToken string) (*User
 		return nil, nil, err
 	}
 
-	// Check if token is revoked
 	tokenHash := hashToken(refreshToken)
+
+	// Start transaction to prevent race conditions
+	// This ensures check-and-revoke is atomic
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	// Check if token is revoked AND lock the row to prevent concurrent refreshes
+	// FOR UPDATE ensures no other transaction can read or modify this row until we commit
 	var revoked bool
-	err = s.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT revoked_at IS NOT NULL FROM refresh_tokens
 		WHERE token_hash = $1 AND user_id = $2
+		FOR UPDATE
 	`, tokenHash, claims.UserID).Scan(&revoked)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -351,9 +362,16 @@ func (s *Service) RefreshTokens(ctx context.Context, refreshToken string) (*User
 		return nil, nil, ErrTokenRevoked
 	}
 
-	// Get user
+	// Immediately revoke the token within the same transaction
+	// This happens before generating new tokens to ensure atomicity
+	_, err = tx.Exec(ctx, "UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1", tokenHash)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Get user (still within transaction for consistency)
 	var user User
-	err = s.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT id, email, role, preferred_language, email_verified, created_at, updated_at
 		FROM users WHERE id = $1
 	`, claims.UserID).Scan(
@@ -367,15 +385,17 @@ func (s *Service) RefreshTokens(ctx context.Context, refreshToken string) (*User
 		return nil, nil, err
 	}
 
-	// Revoke old refresh token
-	_, err = s.db.Exec(ctx, "UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1", tokenHash)
-	if err != nil {
-		log.Warn().Err(err).Msg("Failed to revoke old refresh token")
+	// Commit the transaction (revokes the old token)
+	if err = tx.Commit(ctx); err != nil {
+		return nil, nil, err
 	}
 
-	// Generate new tokens
+	// Generate new tokens (outside transaction - this creates a new token)
 	tokens, err := s.generateTokenPair(ctx, &user)
 	if err != nil {
+		// Note: The old token is already revoked at this point.
+		// If token generation fails, user will need to re-login.
+		// This is safer than leaving the old token valid.
 		return nil, nil, err
 	}
 

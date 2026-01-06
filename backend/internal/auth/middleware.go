@@ -78,7 +78,13 @@ func (m *Middleware) RequireRole(roles ...string) gin.HandlerFunc {
 			return
 		}
 
-		role := userRole.(string)
+		role, ok := userRole.(string)
+		if !ok {
+			response.InternalServerError(c, "Invalid user role in context")
+			c.Abort()
+			return
+		}
+
 		for _, r := range roles {
 			if role == r {
 				c.Next()
@@ -128,7 +134,11 @@ func GetUserID(c *gin.Context) (string, bool) {
 	if !exists {
 		return "", false
 	}
-	return userID.(string), true
+	id, ok := userID.(string)
+	if !ok {
+		return "", false
+	}
+	return id, true
 }
 
 // GetUserRole gets the user role from the context
@@ -137,7 +147,11 @@ func GetUserRole(c *gin.Context) (string, bool) {
 	if !exists {
 		return "", false
 	}
-	return role.(string), true
+	r, ok := role.(string)
+	if !ok {
+		return "", false
+	}
+	return r, true
 }
 
 // IsAuthenticated checks if the user is authenticated

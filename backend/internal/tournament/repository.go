@@ -432,6 +432,13 @@ func (r *PostgresRepository) AddParticipant(ctx context.Context, p *Participant)
 
 	byeRequestsJSON, _ := json.Marshal(p.ByeRequests)
 
+	// Start transaction to ensure participant insert and count update are atomic
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	query := `
 		INSERT INTO tournament_participants (
 			id, tournament_id, section_id, player_id,
@@ -455,7 +462,7 @@ func (r *PostgresRepository) AddParticipant(ctx context.Context, p *Participant)
 			$26, $27
 		)`
 
-	_, err := r.db.Exec(ctx, query,
+	_, err = tx.Exec(ctx, query,
 		p.ID, p.TournamentID, p.SectionID, p.PlayerID,
 		p.RegistrationStatus, p.RegisteredAt,
 		p.StartRank, p.StartingRating,
@@ -474,12 +481,15 @@ func (r *PostgresRepository) AddParticipant(ctx context.Context, p *Participant)
 		return fmt.Errorf("failed to add participant: %w", err)
 	}
 
-	// Update participant count
-	_, err = r.db.Exec(ctx, `
+	// Update participant count within the same transaction
+	_, err = tx.Exec(ctx, `
 		UPDATE tournaments SET participant_count = participant_count + 1 WHERE id = $1
 	`, p.TournamentID)
+	if err != nil {
+		return fmt.Errorf("failed to update participant count: %w", err)
+	}
 
-	return err
+	return tx.Commit(ctx)
 }
 
 func (r *PostgresRepository) GetParticipant(ctx context.Context, id uuid.UUID) (*Participant, error) {
@@ -577,9 +587,16 @@ func (r *PostgresRepository) UpdateParticipant(ctx context.Context, p *Participa
 }
 
 func (r *PostgresRepository) RemoveParticipant(ctx context.Context, id uuid.UUID) error {
-	// Get tournament ID first
+	// Start transaction to ensure participant delete and count update are atomic
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Get tournament ID first (within transaction for consistency)
 	var tournamentID uuid.UUID
-	err := r.db.QueryRow(ctx, "SELECT tournament_id FROM tournament_participants WHERE id = $1", id).Scan(&tournamentID)
+	err = tx.QueryRow(ctx, "SELECT tournament_id FROM tournament_participants WHERE id = $1", id).Scan(&tournamentID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrParticipantNotFound
 	}
@@ -587,7 +604,7 @@ func (r *PostgresRepository) RemoveParticipant(ctx context.Context, id uuid.UUID
 		return err
 	}
 
-	result, err := r.db.Exec(ctx, "DELETE FROM tournament_participants WHERE id = $1", id)
+	result, err := tx.Exec(ctx, "DELETE FROM tournament_participants WHERE id = $1", id)
 	if err != nil {
 		return fmt.Errorf("failed to remove participant: %w", err)
 	}
@@ -595,12 +612,15 @@ func (r *PostgresRepository) RemoveParticipant(ctx context.Context, id uuid.UUID
 		return ErrParticipantNotFound
 	}
 
-	// Update count
-	_, err = r.db.Exec(ctx, `
+	// Update count within the same transaction
+	_, err = tx.Exec(ctx, `
 		UPDATE tournaments SET participant_count = participant_count - 1 WHERE id = $1
 	`, tournamentID)
+	if err != nil {
+		return fmt.Errorf("failed to update participant count: %w", err)
+	}
 
-	return err
+	return tx.Commit(ctx)
 }
 
 func (r *PostgresRepository) ListParticipants(ctx context.Context, tournamentID uuid.UUID) ([]Participant, error) {

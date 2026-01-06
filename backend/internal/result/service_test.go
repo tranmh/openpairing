@@ -235,6 +235,101 @@ func (s *TestableService) reverseParticipantStats(ctx context.Context, participa
 	return s.repo.UpdateParticipantStats(ctx, participantID, pointsDelta, winsDelta, drawsDelta, lossesDelta)
 }
 
+// TestableCorrectService is for testing CorrectResult
+type TestableCorrectService struct {
+	repo ResultRepository
+}
+
+// CorrectResult corrects an existing result (testable version)
+func (s *TestableCorrectService) CorrectResult(ctx context.Context, correction *ResultCorrection) (*ResultEntryResponse, error) {
+	game, err := s.repo.GetGame(ctx, correction.GameID)
+	if err != nil {
+		return nil, errors.New("failed to get game: " + err.Error())
+	}
+
+	if game.Result == nil || *game.Result != string(correction.OldResult) {
+		return nil, errors.New("current result does not match expected old result")
+	}
+
+	oldWhiteScore := game.WhiteScore
+	oldBlackScore := game.BlackScore
+
+	// Reverse old stats
+	if game.WhiteParticipantID != nil && oldWhiteScore != nil {
+		err = s.reverseParticipantStats(ctx, *game.WhiteParticipantID, *oldWhiteScore)
+		if err != nil {
+			return nil, errors.New("failed to reverse white participant stats: " + err.Error())
+		}
+	}
+	if game.BlackParticipantID != nil && oldBlackScore != nil {
+		err = s.reverseParticipantStats(ctx, *game.BlackParticipantID, *oldBlackScore)
+		if err != nil {
+			return nil, errors.New("failed to reverse black participant stats: " + err.Error())
+		}
+	}
+
+	newWhiteScore, newBlackScore := ParseResult(correction.NewResult)
+
+	err = s.repo.UpdateResult(ctx, correction.GameID, string(correction.NewResult), newWhiteScore, newBlackScore, correction.CorrectedBy)
+	if err != nil {
+		return nil, errors.New("failed to update result: " + err.Error())
+	}
+
+	// Apply new stats
+	if game.WhiteParticipantID != nil {
+		err = s.updateParticipantStats(ctx, *game.WhiteParticipantID, newWhiteScore)
+		if err != nil {
+			return nil, errors.New("failed to update white participant stats: " + err.Error())
+		}
+	}
+	if game.BlackParticipantID != nil {
+		err = s.updateParticipantStats(ctx, *game.BlackParticipantID, newBlackScore)
+		if err != nil {
+			return nil, errors.New("failed to update black participant stats: " + err.Error())
+		}
+	}
+
+	return &ResultEntryResponse{
+		GameID:          correction.GameID,
+		Result:          string(correction.NewResult),
+		WhiteScore:      newWhiteScore,
+		BlackScore:      newBlackScore,
+		StandingsUpdate: true,
+	}, nil
+}
+
+func (s *TestableCorrectService) updateParticipantStats(ctx context.Context, participantID uuid.UUID, score float64) error {
+	var winsDelta, drawsDelta, lossesDelta int
+	pointsDelta := int(score * 10)
+
+	switch score {
+	case 1.0:
+		winsDelta = 1
+	case 0.5:
+		drawsDelta = 1
+	case 0.0:
+		lossesDelta = 1
+	}
+
+	return s.repo.UpdateParticipantStats(ctx, participantID, pointsDelta, winsDelta, drawsDelta, lossesDelta)
+}
+
+func (s *TestableCorrectService) reverseParticipantStats(ctx context.Context, participantID uuid.UUID, score float64) error {
+	var winsDelta, drawsDelta, lossesDelta int
+	pointsDelta := -int(score * 10)
+
+	switch score {
+	case 1.0:
+		winsDelta = -1
+	case 0.5:
+		drawsDelta = -1
+	case 0.0:
+		lossesDelta = -1
+	}
+
+	return s.repo.UpdateParticipantStats(ctx, participantID, pointsDelta, winsDelta, drawsDelta, lossesDelta)
+}
+
 // MockResultRepository is a mock implementation of ResultRepository
 type MockResultRepository struct {
 	GetGameFunc                 func(ctx context.Context, gameID uuid.UUID) (*Game, error)
@@ -728,6 +823,142 @@ func TestService_EnterResult_StatsUpdateFails(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, resp)
 	assert.Contains(t, err.Error(), "failed to update white participant stats")
+}
+
+// REGRESSION TEST: Demonstrates the partial failure issue that was FIXED by adding transactions
+// This test uses TestableService (without transactions) to show what WOULD happen without the fix.
+// The production Service now uses database transactions to prevent this inconsistent state.
+func TestService_EnterResult_PartialFailure_LeavesInconsistentState(t *testing.T) {
+	// This test demonstrates what would happen WITHOUT transaction support:
+	// Partial failures would leave the database in an inconsistent state.
+	//
+	// FIX APPLIED: The production Service (service.go) now wraps all database
+	// operations in a transaction. If any step fails, the entire transaction
+	// is rolled back, preventing inconsistent state.
+
+	var resultUpdated bool
+	var whiteStatsUpdated bool
+
+	mockRepo := &MockResultRepository{
+		GetGameFunc: func(ctx context.Context, gameID uuid.UUID) (*Game, error) {
+			return testGame(), nil
+		},
+		UpdateResultFunc: func(ctx context.Context, gameID uuid.UUID, result string, whiteScore, blackScore float64, enteredBy uuid.UUID) error {
+			resultUpdated = true
+			return nil // Result update succeeds
+		},
+		UpdateParticipantStatsFunc: func(ctx context.Context, participantID uuid.UUID, pointsDelta, winsDelta, drawsDelta, lossesDelta int) error {
+			if participantID == testutil.ParticipantID1 {
+				whiteStatsUpdated = true
+				return nil // White stats update succeeds
+			}
+			// Black stats update FAILS
+			return errors.New("database connection lost")
+		},
+	}
+
+	service := NewTestableService(mockRepo)
+	entry := &ResultEntry{
+		GameID:    testutil.GameID1,
+		Result:    ResultWhiteWins,
+		EnteredBy: testutil.UserID1,
+	}
+
+	resp, err := service.EnterResult(context.Background(), entry)
+
+	// The operation fails as expected
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Contains(t, err.Error(), "failed to update black participant stats")
+
+	// Without transactions (TestableService), the following would be true:
+	// - Game shows result "1-0" (already saved)
+	// - White participant has +1 win, +10 points (already saved)
+	// - Black participant has NO stats update (should have +1 loss)
+	//
+	// This demonstrates the old buggy behavior. The production Service now
+	// uses transactions, so a failure at this point would rollback everything.
+	assert.True(t, resultUpdated, "Result was saved before stats update failed (would be rolled back in production)")
+	assert.True(t, whiteStatsUpdated, "White stats were updated before black stats failed (would be rolled back in production)")
+}
+
+// REGRESSION TEST: Demonstrates CorrectResult partial failure that was FIXED by adding transactions
+// This test uses TestableCorrectService (without transactions) to show what WOULD happen without the fix.
+// The production Service now uses database transactions to prevent this data corruption.
+func TestService_CorrectResult_PartialFailure_CorruptsStats(t *testing.T) {
+	// This test demonstrates what would happen WITHOUT transaction support:
+	// CorrectResult could corrupt stats if a failure occurs mid-operation.
+	//
+	// When correcting 1-0 to 0-1, the steps are:
+	// 1. Reverse white's old win: pointsDelta=-10, winsDelta=-1
+	// 2. Reverse black's old loss: pointsDelta=0, lossesDelta=-1
+	// 3. Apply white's new loss: pointsDelta=0, lossesDelta=+1
+	// 4. Apply black's new win: pointsDelta=10, winsDelta=+1
+	//
+	// FIX APPLIED: The production Service (service.go) now wraps all these
+	// operations in a transaction. If any step fails, everything is rolled back.
+
+	var callCount int
+	var whiteReversed, blackReversed, whiteApplied, blackApplied bool
+
+	mockRepo := &MockResultRepository{
+		GetGameFunc: func(ctx context.Context, gameID uuid.UUID) (*Game, error) {
+			return testGameWithResult(), nil // Game has existing result "1-0"
+		},
+		UpdateParticipantStatsFunc: func(ctx context.Context, participantID uuid.UUID, pointsDelta, winsDelta, drawsDelta, lossesDelta int) error {
+			callCount++
+			// Call 1: Reverse white's win (pointsDelta=-10)
+			if callCount == 1 && participantID == testutil.ParticipantID1 && pointsDelta == -10 {
+				whiteReversed = true
+				return nil
+			}
+			// Call 2: Reverse black's loss (pointsDelta=0, lossesDelta=-1)
+			if callCount == 2 && participantID == testutil.ParticipantID2 && lossesDelta == -1 {
+				blackReversed = true
+				return nil
+			}
+			// Call 3: Apply white's new loss - FAIL HERE
+			if callCount == 3 {
+				whiteApplied = true
+				return errors.New("database error during new stats")
+			}
+			// Call 4: This won't be reached
+			blackApplied = true
+			return nil
+		},
+		UpdateResultFunc: func(ctx context.Context, gameID uuid.UUID, result string, whiteScore, blackScore float64, enteredBy uuid.UUID) error {
+			return nil
+		},
+	}
+
+	service := &TestableCorrectService{repo: mockRepo}
+	correction := &ResultCorrection{
+		GameID:      testutil.GameID1,
+		OldResult:   ResultWhiteWins,
+		NewResult:   ResultBlackWins,
+		Reason:      "Correcting score error in original entry",
+		CorrectedBy: testutil.UserID1,
+	}
+
+	_, err := service.CorrectResult(context.Background(), correction)
+
+	require.Error(t, err)
+
+	// Without transactions (TestableCorrectService), the following would happen:
+	// - White's old win stats were reversed (already saved)
+	// - Black's old loss stats were reversed (already saved)
+	// - White's new loss stats failed to apply
+	// - Black's new win stats never applied
+	//
+	// Result: Both players have 0 wins, 0 losses (corrupted!)
+	// They should have: White 0W/1L, Black 1W/0L
+	//
+	// This demonstrates the old buggy behavior. The production Service now
+	// uses transactions, so this failure would rollback the reversals too.
+	assert.True(t, whiteReversed, "White's old stats were reversed (would be rolled back in production)")
+	assert.True(t, blackReversed, "Black's old stats were reversed (would be rolled back in production)")
+	assert.True(t, whiteApplied, "Tried to apply new stats after reversal")
+	assert.False(t, blackApplied, "Black's new stats were never applied due to error")
 }
 
 func TestService_ParticipantStatsDeltas(t *testing.T) {
