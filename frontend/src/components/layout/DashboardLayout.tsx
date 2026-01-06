@@ -18,10 +18,9 @@ interface NavItem {
 }
 
 const navigationItems: NavItem[] = [
-  { key: 'dashboard', href: '/dashboard', icon: HomeIcon },
-  { key: 'tournaments', href: '/dashboard/tournaments', icon: TrophyIcon },
-  { key: 'players', href: '/dashboard/players', icon: UsersIcon },
-  { key: 'teams', href: '/dashboard/teams', icon: TeamIcon },
+  { key: 'home', href: '/home', icon: HomeIcon },
+  { key: 'tournaments', href: '/tournaments', icon: TrophyIcon },
+  { key: 'players', href: '/players', icon: UsersIcon },
 ];
 
 interface UserNavItem {
@@ -30,8 +29,8 @@ interface UserNavItem {
 }
 
 const userNavigationItems: UserNavItem[] = [
-  { key: 'profile', href: '/dashboard/profile' },
-  { key: 'settings', href: '/dashboard/settings' },
+  { key: 'profile', href: '/profile' },
+  { key: 'settings', href: '/settings' },
 ];
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
@@ -64,7 +63,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         <div className="flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
           {/* Logo */}
           <div className="flex items-center gap-8">
-            <Link href="/dashboard" className="text-xl font-bold">
+            <Link href="/tournaments" className="text-xl font-bold">
               OpenPairing
             </Link>
 

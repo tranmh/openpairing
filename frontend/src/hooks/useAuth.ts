@@ -49,7 +49,7 @@ export function useRequireAuth(redirectTo: string = '/login') {
 /**
  * Hook that redirects away if already authenticated
  */
-export function useRedirectIfAuthenticated(redirectTo: string = '/dashboard') {
+export function useRedirectIfAuthenticated(redirectTo: string = '/tournaments') {
   const router = useRouter();
   const pathname = usePathname();
   const { isAuthenticated, isLoading, isHydrated } = useAuthStore();

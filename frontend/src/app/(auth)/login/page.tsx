@@ -9,7 +9,7 @@ import { useRedirectIfAuthenticated } from '@/hooks/useAuth';
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const returnUrl = searchParams.get('returnUrl') || '/dashboard';
+  const returnUrl = searchParams.get('returnUrl') || '/tournaments';
   const registered = searchParams.get('registered');
 
   const { login, isLoading, error, clearError } = useAuthStore();
