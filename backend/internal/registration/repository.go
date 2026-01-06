@@ -27,6 +27,8 @@ var (
 	ErrCheckInWindowClosed     = errors.New("check-in window is closed")
 	ErrGuestsNotAllowed        = errors.New("guest registration is not allowed")
 	ErrPreRegistrationDisabled = errors.New("pre-registration is disabled")
+	ErrAlreadyCheckedIn        = errors.New("already checked in")
+	ErrInvalidCheckInStatus    = errors.New("registration status does not allow check-in")
 )
 
 // Repository defines the registration data access interface
@@ -45,6 +47,7 @@ type Repository interface {
 	// Participant check-in (existing participants)
 	SetParticipantCheckIn(ctx context.Context, participantID uuid.UUID, method string, checkedInBy *uuid.UUID) error
 	GetParticipantByCheckInCode(ctx context.Context, code string) (*uuid.UUID, *uuid.UUID, error) // returns participantID, tournamentID
+	GetParticipantTournamentID(ctx context.Context, participantID uuid.UUID) (*uuid.UUID, error)
 
 	// Tournament queries
 	GetTournamentBySlug(ctx context.Context, slug string) (*TournamentPublicInfo, *tournament.RegistrationSettings, error)
@@ -61,6 +64,7 @@ type Repository interface {
 	CreateInviteToken(ctx context.Context, token *InviteToken, rawToken string) error
 	GetInviteToken(ctx context.Context, id uuid.UUID) (*InviteToken, error)
 	ValidateInviteToken(ctx context.Context, tournamentID uuid.UUID, tokenStr string) (*InviteToken, error)
+	ValidateAndUseInviteToken(ctx context.Context, tournamentID uuid.UUID, tokenStr string) (*InviteToken, error)
 	IncrementInviteTokenUses(ctx context.Context, id uuid.UUID) error
 	ListInviteTokens(ctx context.Context, tournamentID uuid.UUID) ([]InviteToken, error)
 	DeleteInviteToken(ctx context.Context, id uuid.UUID) error
@@ -261,19 +265,39 @@ func (r *PostgresRepository) SetGuestApproval(ctx context.Context, id uuid.UUID,
 	return nil
 }
 
-// SetGuestCheckIn marks a guest as checked in
+// SetGuestCheckIn marks a guest as checked in atomically
+// This prevents race conditions by checking status in the WHERE clause
 func (r *PostgresRepository) SetGuestCheckIn(ctx context.Context, id uuid.UUID, method string, checkedInBy *uuid.UUID) error {
+	// Atomic update: only check in if not already checked in and status allows it
 	result, err := r.db.Exec(ctx, `
 		UPDATE tournament_guest_registrations
 		SET registration_status = $2, checked_in_at = NOW(), check_in_method = $3, checked_in_by = $4, updated_at = NOW()
 		WHERE id = $1
-	`, id, StatusCheckedIn, method, checkedInBy)
+		AND checked_in_at IS NULL
+		AND registration_status IN ($5, $6)
+	`, id, StatusCheckedIn, method, checkedInBy, StatusPreRegistered, StatusApproved)
 
 	if err != nil {
 		return err
 	}
 	if result.RowsAffected() == 0 {
-		return ErrRegistrationNotFound
+		// Check why: not found, already checked in, or invalid status
+		var status string
+		var checkedInAt *time.Time
+		err := r.db.QueryRow(ctx,
+			"SELECT registration_status, checked_in_at FROM tournament_guest_registrations WHERE id = $1",
+			id,
+		).Scan(&status, &checkedInAt)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrRegistrationNotFound
+			}
+			return err
+		}
+		if checkedInAt != nil {
+			return ErrAlreadyCheckedIn
+		}
+		return ErrInvalidCheckInStatus
 	}
 	return nil
 }
@@ -382,18 +406,36 @@ func (r *PostgresRepository) DeleteGuestRegistration(ctx context.Context, id uui
 	return tx.Commit(ctx)
 }
 
-// SetParticipantCheckIn marks a participant as checked in
+// SetParticipantCheckIn marks a participant as checked in atomically
+// This prevents race conditions by checking if already checked in in the WHERE clause
 func (r *PostgresRepository) SetParticipantCheckIn(ctx context.Context, participantID uuid.UUID, method string, checkedInBy *uuid.UUID) error {
+	// Atomic update: only check in if not already checked in
 	result, err := r.db.Exec(ctx, `
 		UPDATE tournament_participants
 		SET checked_in_at = NOW(), check_in_method = $2, checked_in_by = $3
 		WHERE id = $1
+		AND checked_in_at IS NULL
 	`, participantID, method, checkedInBy)
 
 	if err != nil {
 		return err
 	}
 	if result.RowsAffected() == 0 {
+		// Check why: not found or already checked in
+		var checkedInAt *time.Time
+		err := r.db.QueryRow(ctx,
+			"SELECT checked_in_at FROM tournament_participants WHERE id = $1",
+			participantID,
+		).Scan(&checkedInAt)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrRegistrationNotFound
+			}
+			return err
+		}
+		if checkedInAt != nil {
+			return ErrAlreadyCheckedIn
+		}
 		return ErrRegistrationNotFound
 	}
 	return nil
@@ -415,6 +457,24 @@ func (r *PostgresRepository) GetParticipantByCheckInCode(ctx context.Context, co
 	}
 
 	return &participantID, &tournamentID, nil
+}
+
+// GetParticipantTournamentID returns the tournament ID for a participant
+func (r *PostgresRepository) GetParticipantTournamentID(ctx context.Context, participantID uuid.UUID) (*uuid.UUID, error) {
+	var tournamentID uuid.UUID
+	err := r.db.QueryRow(ctx,
+		"SELECT tournament_id FROM tournament_participants WHERE id = $1",
+		participantID,
+	).Scan(&tournamentID)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrRegistrationNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &tournamentID, nil
 }
 
 // GetTournamentBySlug retrieves public tournament info by slug
@@ -667,6 +727,7 @@ func (r *PostgresRepository) ValidateInviteToken(ctx context.Context, tournament
 }
 
 // IncrementInviteTokenUses atomically increments the uses count, failing if max uses reached
+// DEPRECATED: Use ValidateAndUseInviteToken instead to prevent TOCTOU race conditions
 func (r *PostgresRepository) IncrementInviteTokenUses(ctx context.Context, id uuid.UUID) error {
 	// Atomic increment with max uses check - if no rows updated, max uses was reached
 	result, err := r.db.Exec(ctx, `
@@ -682,6 +743,66 @@ func (r *PostgresRepository) IncrementInviteTokenUses(ctx context.Context, id uu
 		return ErrInvalidInviteToken // Max uses reached or token not found
 	}
 	return nil
+}
+
+// ValidateAndUseInviteToken atomically validates and consumes an invite token use in a single transaction
+// This prevents TOCTOU race conditions where token is validated then incremented separately
+func (r *PostgresRepository) ValidateAndUseInviteToken(ctx context.Context, tournamentID uuid.UUID, tokenStr string) (*InviteToken, error) {
+	tokenHash := hashToken(tokenStr)
+
+	// Start transaction
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	// Lock the token row and check validity
+	var token InviteToken
+	err = tx.QueryRow(ctx, `
+		SELECT id, tournament_id, token_hash, name, max_uses, uses_count, valid_until, created_by, created_at
+		FROM tournament_invite_tokens
+		WHERE tournament_id = $1 AND token_hash = $2
+		FOR UPDATE
+	`, tournamentID, tokenHash).Scan(
+		&token.ID, &token.TournamentID, &token.TokenHash, &token.Name,
+		&token.MaxUses, &token.UsesCount, &token.ValidUntil, &token.CreatedBy, &token.CreatedAt,
+	)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrInvalidInviteToken
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if expired
+	if token.ValidUntil != nil && time.Now().After(*token.ValidUntil) {
+		return nil, ErrInvalidInviteToken
+	}
+
+	// Check if max uses reached
+	if token.MaxUses != nil && token.UsesCount >= *token.MaxUses {
+		return nil, ErrInvalidInviteToken
+	}
+
+	// Atomically increment uses count
+	_, err = tx.Exec(ctx, `
+		UPDATE tournament_invite_tokens
+		SET uses_count = uses_count + 1
+		WHERE id = $1
+	`, token.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Commit transaction
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	token.UsesCount++ // Reflect the increment in the returned token
+	return &token, nil
 }
 
 // ListInviteTokens lists all invite tokens for a tournament

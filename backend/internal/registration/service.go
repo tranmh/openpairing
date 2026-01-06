@@ -59,13 +59,11 @@ func (s *Service) PreRegister(ctx context.Context, tournamentID uuid.UUID, req *
 		if req.InviteToken == "" {
 			return nil, ErrInvalidInviteToken
 		}
-		token, err := s.repo.ValidateInviteToken(ctx, tournamentID, req.InviteToken)
+		// Use atomic validate-and-use to prevent TOCTOU race conditions
+		// This validates the token AND increments uses in a single transaction
+		_, err := s.repo.ValidateAndUseInviteToken(ctx, tournamentID, req.InviteToken)
 		if err != nil {
 			return nil, err
-		}
-		// Atomically increment uses (will fail if max uses exceeded)
-		if err := s.repo.IncrementInviteTokenUses(ctx, token.ID); err != nil {
-			return nil, ErrInvalidInviteToken // Token max uses exceeded
 		}
 	}
 
@@ -238,36 +236,35 @@ func (s *Service) checkInByCode(ctx context.Context, code string, method string,
 	now := time.Now()
 
 	if isGuest {
-		// Get guest registration to check status
-		reg, err := s.repo.GetGuestRegistration(ctx, *regID)
-		if err != nil {
-			return nil, err
-		}
-
-		// Check if already checked in
-		if reg.CheckedInAt != nil {
-			return &CheckInResponse{
-				Success:   true,
-				ID:        reg.ID,
-				Status:    StatusCheckedIn,
-				CheckedIn: *reg.CheckedInAt,
-				Message:   "Du bist bereits eingecheckt.",
-			}, nil
-		}
-
-		// Check registration status - only approved or pre-registered can check in
-		switch reg.RegistrationStatus {
-		case StatusRejected:
-			return nil, fmt.Errorf("registration was rejected")
-		case StatusPendingApproval:
-			return nil, fmt.Errorf("registration is pending organizer approval")
-		case StatusPreRegistered, StatusApproved:
-			// OK to check in
-		default:
-			return nil, fmt.Errorf("invalid registration status for check-in: %s", reg.RegistrationStatus)
-		}
-
+		// Atomically check in the guest - the repository handles status validation
 		if err := s.repo.SetGuestCheckIn(ctx, *regID, method, checkedInBy); err != nil {
+			if err == ErrAlreadyCheckedIn {
+				// Return success for idempotency - they're already checked in
+				reg, getErr := s.repo.GetGuestRegistration(ctx, *regID)
+				if getErr == nil && reg.CheckedInAt != nil {
+					return &CheckInResponse{
+						Success:   true,
+						ID:        reg.ID,
+						Status:    StatusCheckedIn,
+						CheckedIn: *reg.CheckedInAt,
+						Message:   "Du bist bereits eingecheckt.",
+					}, nil
+				}
+				return nil, err
+			}
+			if err == ErrInvalidCheckInStatus {
+				// Get status to provide specific error message
+				reg, getErr := s.repo.GetGuestRegistration(ctx, *regID)
+				if getErr == nil {
+					switch reg.RegistrationStatus {
+					case StatusRejected:
+						return nil, fmt.Errorf("registration was rejected")
+					case StatusPendingApproval:
+						return nil, fmt.Errorf("registration is pending organizer approval")
+					}
+				}
+				return nil, fmt.Errorf("registration status does not allow check-in")
+			}
 			return nil, fmt.Errorf("failed to check in: %w", err)
 		}
 
@@ -285,8 +282,18 @@ func (s *Service) checkInByCode(ctx context.Context, code string, method string,
 		}, nil
 	}
 
-	// Participant check-in
+	// Participant check-in - repository handles idempotency check
 	if err := s.repo.SetParticipantCheckIn(ctx, *regID, method, checkedInBy); err != nil {
+		if err == ErrAlreadyCheckedIn {
+			// Return success for idempotency
+			return &CheckInResponse{
+				Success:   true,
+				ID:        *regID,
+				Status:    StatusCheckedIn,
+				CheckedIn: now,
+				Message:   "Du bist bereits eingecheckt.",
+			}, nil
+		}
 		return nil, fmt.Errorf("failed to check in: %w", err)
 	}
 

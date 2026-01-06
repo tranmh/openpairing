@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/openpairing/openpairing/internal/auth"
 	"github.com/openpairing/openpairing/internal/chess"
 	"github.com/openpairing/openpairing/internal/config"
 	"github.com/openpairing/openpairing/internal/database"
@@ -20,13 +22,34 @@ import (
 )
 
 var (
-	hub      *server.Hub
-	upgrader = websocket.Upgrader{
+	hub        *server.Hub
+	jwtService *auth.JWTService
+	upgrader   = websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 		CheckOrigin: func(r *http.Request) bool {
-			// In production, check origin properly
-			return true
+			// In production, validate against allowed origins
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return true // Allow connections without Origin header (non-browser clients)
+			}
+			allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
+			if allowedOrigins == "" {
+				// In development, allow all
+				if os.Getenv("ENVIRONMENT") == "development" {
+					return true
+				}
+				// In production, deny if no allowed origins configured
+				log.Warn().Str("origin", origin).Msg("WebSocket connection rejected: no ALLOWED_ORIGINS configured")
+				return false
+			}
+			for _, allowed := range strings.Split(allowedOrigins, ",") {
+				if strings.TrimSpace(allowed) == origin {
+					return true
+				}
+			}
+			log.Warn().Str("origin", origin).Msg("WebSocket connection rejected: origin not in allowed list")
+			return false
 		},
 	}
 )
@@ -40,6 +63,9 @@ func main() {
 
 	// Load configuration
 	cfg := config.Load()
+
+	// Initialize JWT service for token validation
+	jwtService = auth.NewJWTService(&cfg.JWT)
 
 	// Connect to database (for game persistence)
 	db, err := database.New(&cfg.Database)
@@ -129,19 +155,38 @@ func handleGameWebSocket(c *gin.Context) {
 		return
 	}
 
-	// Get user ID from query param or header (in production, extract from JWT)
-	userIDStr := c.Query("userId")
-	if userIDStr == "" {
-		userIDStr = c.GetHeader("X-User-ID")
+	// Extract and validate JWT token
+	// Token can be in Authorization header or query param (for WebSocket clients that can't set headers)
+	token := ""
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" {
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+			token = parts[1]
+		}
 	}
-	if userIDStr == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "user ID required"})
+	if token == "" {
+		token = c.Query("token")
+	}
+	if token == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
 		return
 	}
 
-	userID, err := uuid.Parse(userIDStr)
+	// Validate the token and extract claims
+	claims, err := jwtService.ValidateAccessToken(token)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		if err == auth.ErrExpiredToken {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "token has expired"})
+		} else {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+		}
+		return
+	}
+
+	userID, err := uuid.Parse(claims.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user ID in token"})
 		return
 	}
 

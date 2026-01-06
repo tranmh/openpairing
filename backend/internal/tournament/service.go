@@ -1170,7 +1170,21 @@ func (s *Service) RecalculateTiebreaks(ctx context.Context, tournamentID uuid.UU
 		tiebreakCodes = append(tiebreakCodes, tiebreak.TiebreakCode(tb))
 	}
 
-	calc := tiebreak.NewCalculator(tiebreakCodes, tournament.Rounds)
+	// Get scoring settings (use defaults if not set)
+	scoring := tournament.ScoringSettings
+	if scoring == nil {
+		scoring = DefaultScoringSettings()
+	}
+
+	// Convert tournament scoring settings to tiebreak scoring config
+	scoringConfig := &tiebreak.ScoringConfig{
+		WinPoints:           scoring.WinPoints,
+		DrawPoints:          scoring.DrawPoints,
+		LossPoints:          scoring.LossPoints,
+		SonnebornBergerMode: string(scoring.SonnebornBergerMode),
+	}
+
+	calc := tiebreak.NewCalculatorWithScoring(tiebreakCodes, tournament.Rounds, scoringConfig)
 
 	// Build player data
 	for _, p := range participants {
@@ -1218,7 +1232,8 @@ func (s *Service) RecalculateTiebreaks(ctx context.Context, tournamentID uuid.UU
 				}
 				result.PlayedWhite = false
 				playerData.GamesAsBlack++
-				if result.Score == 1 {
+				// Use scoring settings instead of hardcoded value to correctly count wins with black
+				if result.Score == scoring.WinPoints {
 					playerData.WinsAsBlack++
 				}
 				if g.WhiteParticipantID != nil {

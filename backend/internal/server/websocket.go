@@ -302,6 +302,15 @@ func (h *Hub) handleAcceptDraw(msg *Message) {
 	}
 
 	game := h.gameManager.GetGame(gameID)
+	if game == nil {
+		// Game was cleaned up between AcceptDraw and GetGame - notify draw accepted but can't broadcast state
+		h.logger.Warn().Str("game_id", gameID.String()).Msg("Game not found after accepting draw")
+		h.broadcastToGame(gameID, "game_over", map[string]interface{}{
+			"result":      "1/2-1/2",
+			"termination": "agreement",
+		})
+		return
+	}
 	state := game.GetState()
 
 	h.broadcastToGame(gameID, "game_over", map[string]interface{}{
@@ -339,6 +348,14 @@ func (h *Hub) handleResign(msg *Message) {
 	}
 
 	game := h.gameManager.GetGame(gameID)
+	if game == nil {
+		// Game was cleaned up between Resign and GetGame - notify resignation but can't broadcast state
+		h.logger.Warn().Str("game_id", gameID.String()).Msg("Game not found after resignation")
+		h.broadcastToGame(gameID, "game_over", map[string]interface{}{
+			"termination": "resignation",
+		})
+		return
+	}
 	state := game.GetState()
 
 	h.broadcastToGame(gameID, "game_over", map[string]interface{}{

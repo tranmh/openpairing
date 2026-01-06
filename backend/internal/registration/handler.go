@@ -333,6 +333,13 @@ func (h *Handler) ApproveRegistration(c *gin.Context) {
 
 // ManualCheckIn performs manual check-in by organizer
 func (h *Handler) ManualCheckIn(c *gin.Context) {
+	// Get tournament ID from URL - organizer must be authorized for this tournament (via middleware)
+	tournamentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.BadRequest(c, "Ungültige Turnier-ID")
+		return
+	}
+
 	regID, err := uuid.Parse(c.Param("regId"))
 	if err != nil {
 		response.BadRequest(c, "Ungültige Anmeldungs-ID")
@@ -342,19 +349,53 @@ func (h *Handler) ManualCheckIn(c *gin.Context) {
 	userIDStr, _ := c.Get("user_id")
 	organizerID, _ := uuid.Parse(userIDStr.(string))
 
-	// Try guest first
-	if err := h.service.repo.SetGuestCheckIn(c.Request.Context(), regID, "organizer", &organizerID); err == nil {
+	// Try guest first - verify registration belongs to this tournament
+	guest, err := h.service.repo.GetGuestRegistration(c.Request.Context(), regID)
+	if err == nil {
+		// Verify the registration belongs to this tournament
+		if guest.TournamentID != tournamentID {
+			response.Forbidden(c, "Keine Berechtigung für diese Anmeldung")
+			return
+		}
+		if err := h.service.repo.SetGuestCheckIn(c.Request.Context(), regID, "organizer", &organizerID); err != nil {
+			if err == ErrAlreadyCheckedIn {
+				response.Success(c, http.StatusOK, gin.H{"message": "Bereits eingecheckt"})
+				return
+			}
+			if err == ErrInvalidCheckInStatus {
+				response.BadRequest(c, "Anmeldungsstatus erlaubt kein Check-in")
+				return
+			}
+			h.logger.Error().Err(err).Msg("Failed to check in guest")
+			response.InternalServerError(c, "Fehler beim Check-in")
+			return
+		}
 		response.Success(c, http.StatusOK, gin.H{"message": "Eingecheckt"})
 		return
 	}
 
-	// Try participant
-	if err := h.service.repo.SetParticipantCheckIn(c.Request.Context(), regID, "organizer", &organizerID); err != nil {
-		response.NotFound(c, "Anmeldung nicht gefunden")
+	// Try participant - verify registration belongs to this tournament
+	participantTournamentID, err := h.service.repo.GetParticipantTournamentID(c.Request.Context(), regID)
+	if err == nil && participantTournamentID != nil {
+		if *participantTournamentID != tournamentID {
+			response.Forbidden(c, "Keine Berechtigung für diese Anmeldung")
+			return
+		}
+		if err := h.service.repo.SetParticipantCheckIn(c.Request.Context(), regID, "organizer", &organizerID); err != nil {
+			if err == ErrAlreadyCheckedIn {
+				response.Success(c, http.StatusOK, gin.H{"message": "Bereits eingecheckt"})
+				return
+			}
+			h.logger.Error().Err(err).Msg("Failed to check in participant")
+			response.InternalServerError(c, "Fehler beim Check-in")
+			return
+		}
+		response.Success(c, http.StatusOK, gin.H{"message": "Eingecheckt"})
 		return
 	}
 
-	response.Success(c, http.StatusOK, gin.H{"message": "Eingecheckt"})
+	// Not found as either guest or participant
+	response.NotFound(c, "Anmeldung nicht gefunden")
 }
 
 // GetCheckInStatus returns check-in statistics
