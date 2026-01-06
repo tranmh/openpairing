@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -48,6 +48,7 @@ import { WamGroupsTab, WamParticipantsTab } from '@/components/wam';
 import { SeatingView } from '@/components/tournament/SeatingView';
 import { RoundRobinSettingsForm } from '@/components/tournament/RoundRobinSettingsForm';
 import { ReportsTab } from '@/components/tournament/ReportsTab';
+import { ExportsTab } from '@/components/tournament/ExportsTab';
 
 interface Tournament {
   id: string;
@@ -288,10 +289,6 @@ export default function TournamentDetailPage() {
               Einstellungen
             </Button>
           </Link>
-          <Button variant="outline" onClick={() => window.open(`/api/v1/tournaments/${tournamentId}/export/trf`)}>
-            <Download className="mr-2 h-4 w-4" />
-            TRF Export
-          </Button>
         </div>
       </div>
 
@@ -378,6 +375,10 @@ export default function TournamentDetailPage() {
           <TabsTrigger value="reports">
             <FileText className="mr-1 h-4 w-4" />
             Berichte
+          </TabsTrigger>
+          <TabsTrigger value="exports">
+            <Download className="mr-1 h-4 w-4" />
+            Exporte
           </TabsTrigger>
         </TabsList>
 
@@ -523,6 +524,14 @@ export default function TournamentDetailPage() {
         <TabsContent value="reports">
           <ReportsTab tournamentId={tournamentId} />
         </TabsContent>
+
+        <TabsContent value="exports">
+          <ExportsTab
+            tournamentId={tournamentId}
+            currentRound={rounds.length > 0 ? Math.max(...rounds.map(r => r.roundNumber)) : 0}
+            totalRounds={rounds.length > 0 ? Math.max(...rounds.map(r => r.roundNumber)) : 0}
+          />
+        </TabsContent>
       </Tabs>
     </div>
   );
@@ -546,21 +555,10 @@ function ParticipantsTab({
           <CardTitle>Teilnehmerliste ({activeParticipants.length})</CardTitle>
           <div className="flex gap-2">
             {activeParticipants.length > 0 && (
-              <>
-                <Button variant="outline" size="sm" onClick={() => window.print()} className="no-print">
-                  <Printer className="mr-2 h-4 w-4" />
-                  Drucken
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => window.open(`/api/v1/tournaments/${tournamentId}/export/participants/pdf`)}
-                  className="no-print"
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  PDF
-                </Button>
-              </>
+              <Button variant="outline" size="sm" onClick={() => window.print()} className="no-print">
+                <Printer className="mr-2 h-4 w-4" />
+                Drucken
+              </Button>
             )}
             {canRegister && (
               <Link href={`/tournaments/${tournamentId}/register`}>
@@ -618,10 +616,14 @@ function PairingsTab({
   tournamentId: string;
   rounds: Round[];
 }) {
-  const [selectedRound, setSelectedRound] = useState(
-    rounds.length > 0 ? rounds[rounds.length - 1].roundNumber : 1
-  );
+  const maxRound = rounds.length > 0 ? Math.max(...rounds.map(r => r.roundNumber)) : 1;
+  const [selectedRound, setSelectedRound] = useState(maxRound);
   const queryClient = useQueryClient();
+
+  // Update selected round when rounds change (e.g., new round created)
+  useEffect(() => {
+    setSelectedRound(maxRound);
+  }, [maxRound]);
 
   const { data: pairingsData, isLoading } = useQuery({
     queryKey: ['pairings', tournamentId, selectedRound],
@@ -670,21 +672,10 @@ function PairingsTab({
               ))}
             </select>
             {games.length > 0 && (
-              <>
-                <Button variant="outline" size="sm" onClick={() => window.print()} className="no-print">
-                  <Printer className="mr-2 h-4 w-4" />
-                  Drucken
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => window.open(`/api/v1/tournaments/${tournamentId}/rounds/${selectedRound}/export/pairings/pdf`)}
-                  className="no-print"
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  PDF
-                </Button>
-              </>
+              <Button variant="outline" size="sm" onClick={() => window.print()} className="no-print">
+                <Printer className="mr-2 h-4 w-4" />
+                Drucken
+              </Button>
             )}
             {currentRound?.status === 'pending' && (
               <Button onClick={() => generatePairingsMutation.mutate()}>
@@ -755,28 +746,10 @@ function StandingsTab({ tournamentId }: { tournamentId: string }) {
         <div className="flex justify-between items-center">
           <CardTitle>Tabelle</CardTitle>
           {standings.length > 0 && (
-            <div className="flex gap-2 no-print">
-              <Button variant="outline" size="sm" onClick={() => window.print()}>
-                <Printer className="mr-2 h-4 w-4" />
-                Drucken
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => window.open(`/api/v1/tournaments/${tournamentId}/export/standings/pdf`)}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                PDF
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => window.open(`/api/v1/tournaments/${tournamentId}/export/crosstable/pdf`)}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Kreuztabelle
-              </Button>
-            </div>
+            <Button variant="outline" size="sm" onClick={() => window.print()} className="no-print">
+              <Printer className="mr-2 h-4 w-4" />
+              Drucken
+            </Button>
           )}
         </div>
       </CardHeader>
