@@ -371,6 +371,31 @@ run_migrations() {
     log_info "Migrations completed"
 }
 
+seed_database() {
+    log_info "Seeding database with demo data..."
+
+    export PATH=$PATH:/usr/local/go/bin
+    cd "$PROJECT_DIR/backend"
+
+    # Build seed command
+    log_info "Building seed command..."
+    go build -o /tmp/openpairing-seed ./cmd/seed
+
+    # Run seed with force flag for --force deployments
+    if [ "$FORCE_MODE" = true ]; then
+        log_info "Running seed with --force (clearing existing data)..."
+        /tmp/openpairing-seed --force \
+            --db-url="postgres://$DB_USER:$DB_PASSWORD@localhost:$POSTGRES_PORT/$DB_NAME?sslmode=disable"
+    else
+        log_info "Running seed (idempotent)..."
+        /tmp/openpairing-seed \
+            --db-url="postgres://$DB_USER:$DB_PASSWORD@localhost:$POSTGRES_PORT/$DB_NAME?sslmode=disable"
+    fi
+
+    rm -f /tmp/openpairing-seed
+    log_info "Database seeding completed"
+}
+
 build_backend() {
     log_info "Building backend services..."
 
@@ -404,7 +429,7 @@ build_frontend() {
     npm ci || npm install
 
     # Build for production
-    NEXT_PUBLIC_API_URL="http://localhost:$API_PORT" \
+    NEXT_PUBLIC_API_URL="http://localhost:$API_PORT/api/v1" \
     NEXT_PUBLIC_WS_URL="ws://localhost:$CHESS_PORT" \
     npm run build
 
@@ -461,7 +486,7 @@ ENVIRONMENT=production
 LOG_LEVEL=info
 
 # Frontend URLs
-NEXT_PUBLIC_API_URL=http://localhost:$API_PORT
+NEXT_PUBLIC_API_URL=http://localhost:$API_PORT/api/v1
 NEXT_PUBLIC_WS_URL=ws://localhost:$CHESS_PORT
 NEXT_PUBLIC_APP_URL=http://localhost:$FRONTEND_PORT
 CORS_ALLOWED_ORIGINS=http://localhost:$FRONTEND_PORT
@@ -680,6 +705,10 @@ print_summary() {
     echo "  - Password: $DB_PASSWORD"
     echo "  - Database: $DB_NAME"
     echo ""
+    echo "Admin login:"
+    echo "  - Email:    admin@openpairing.org"
+    echo "  - Password: admin123"
+    echo ""
     echo "Configuration files:"
     echo "  - Environment: $INSTALL_DIR/.env"
     echo "  - Credentials: $CREDENTIALS_FILE"
@@ -724,6 +753,7 @@ main() {
     setup_postgres
     setup_redis
     run_migrations
+    seed_database
     build_backend
     build_frontend
     create_env_file

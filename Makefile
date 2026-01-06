@@ -1,4 +1,4 @@
-.PHONY: all build test lint clean dev docker-up docker-down migrate help
+.PHONY: all build test lint clean dev docker-up docker-down migrate seed help
 
 # Variables
 BACKEND_DIR := backend
@@ -22,6 +22,8 @@ help:
 	@echo "  make docker-down  - Stop Docker services"
 	@echo "  make migrate-up   - Run database migrations"
 	@echo "  make migrate-down - Rollback database migrations"
+	@echo "  make seed         - Seed database with demo data"
+	@echo "  make seed-force   - Force seed (clear existing data)"
 	@echo ""
 
 # Development
@@ -108,6 +110,15 @@ migrate-down:
 migrate-create:
 	@read -p "Enter migration name: " name; \
 	migrate create -ext sql -dir $(BACKEND_DIR)/migrations -seq $$name
+
+# Database seeding
+seed:
+	@echo "Seeding database with demo data..."
+	cd $(BACKEND_DIR) && go run ./cmd/seed --db-url="postgres://openpairing:openpairing_dev@localhost:5432/openpairing?sslmode=disable"
+
+seed-force:
+	@echo "Force seeding database (clearing existing data)..."
+	cd $(BACKEND_DIR) && go run ./cmd/seed --force --db-url="postgres://openpairing:openpairing_dev@localhost:5432/openpairing?sslmode=disable"
 
 # Install development tools
 install-tools:
