@@ -24,10 +24,10 @@ LOG_DIR="/var/log/openpairing"
 CONFIG_DIR="/etc/openpairing"
 CREDENTIALS_FILE="$CONFIG_DIR/credentials"
 
-# Service ports (use non-conflicting ports)
-API_PORT=8082
-CHESS_PORT=8083
-FRONTEND_PORT=3001
+# Service ports
+API_PORT=8080
+CHESS_PORT=8081
+FRONTEND_PORT=3000
 POSTGRES_PORT=5432
 REDIS_PORT=6379
 
