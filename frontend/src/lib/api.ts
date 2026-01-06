@@ -28,6 +28,34 @@ class ApiClient {
     this.accessToken = token;
   }
 
+  /**
+   * Get the access token, falling back to localStorage if not set.
+   * This ensures the token is available even if setAccessToken wasn't called
+   * due to timing issues during hydration.
+   */
+  private getAccessToken(): string | null {
+    if (this.accessToken) {
+      return this.accessToken;
+    }
+    // Fallback: try to read from localStorage if available
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('openpairing-auth');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed?.state?.accessToken) {
+            // Also update the local cache
+            this.accessToken = parsed.state.accessToken;
+            return this.accessToken;
+          }
+        }
+      } catch {
+        // Ignore localStorage errors
+      }
+    }
+    return null;
+  }
+
   private async request<T>(
     method: string,
     path: string,
@@ -49,8 +77,9 @@ class ApiClient {
       ...options?.headers,
     };
 
-    if (this.accessToken) {
-      headers['Authorization'] = `Bearer ${this.accessToken}`;
+    const token = this.getAccessToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
     }
 
     try {
