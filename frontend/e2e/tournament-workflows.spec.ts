@@ -700,6 +700,294 @@ test.describe('Common UI Bug Tests', () => {
 });
 
 // ============================================================================
+// BUG #9: RESULT ENTRY 400 ERROR DEBUG TEST
+// ============================================================================
+
+test.describe('Result Entry Debug Tests', () => {
+  test.beforeEach(async ({ page }) => {
+    await login(page);
+  });
+
+  test('BUG-09: Debug result entry 400 error on tournament detail page', async ({ page }) => {
+    // Capture all network requests/responses for debugging
+    const networkLogs: { url: string; method: string; status: number; body?: string; response?: string }[] = [];
+
+    page.on('request', request => {
+      if (request.url().includes('/results')) {
+        console.log('>>> REQUEST to /results:', {
+          url: request.url(),
+          method: request.method(),
+          postData: request.postData(),
+        });
+      }
+    });
+
+    page.on('response', async response => {
+      if (response.url().includes('/results')) {
+        const status = response.status();
+        let responseBody = '';
+        try {
+          responseBody = await response.text();
+        } catch (e) {
+          responseBody = 'Could not read response body';
+        }
+        console.log('<<< RESPONSE from /results:', {
+          url: response.url(),
+          status,
+          body: responseBody,
+        });
+        networkLogs.push({
+          url: response.url(),
+          method: response.request().method(),
+          status,
+          body: response.request().postData() || '',
+          response: responseBody,
+        });
+      }
+    });
+
+    // Step 1: Create a tournament
+    const tournamentName = uniqueTournamentName('Result Entry Debug');
+
+    await page.click('text=Neues Turnier');
+    await page.waitForURL('**/tournaments/new');
+
+    await page.fill('input[name="name"]', tournamentName);
+    await page.fill('input[name="rounds"]', '1');
+    await page.click('button:has-text("Weiter")');
+    await page.waitForTimeout(500);
+
+    // Set date
+    await page.click('button:has-text("Datum wählen")');
+    await page.waitForSelector('[role="gridcell"]');
+    await page.click(`[role="gridcell"]:has-text("${new Date().getDate()}")`);
+
+    await page.click('button:has-text("Weiter")');
+    await page.waitForTimeout(500);
+
+    // Submit
+    const submitBtn = page.locator('button:has-text("Turnier erstellen")');
+    if (await submitBtn.isVisible()) {
+      await submitBtn.click();
+    }
+
+    await page.waitForURL(/\/tournaments\/[a-f0-9-]+$/, { timeout: 15000 });
+    const tournamentId = page.url().split('/tournaments/')[1]?.split('/')[0];
+    console.log('Tournament ID:', tournamentId);
+
+    // Step 2: Publish tournament
+    await page.locator('button:has-text("Veröffentlichen")').first().click();
+    await page.waitForSelector('div[role="alertdialog"], div[role="dialog"]', { timeout: 5000 });
+    await page.locator('div[role="alertdialog"] button:has-text("Veröffentlichen"), div[role="dialog"] button:has-text("Veröffentlichen")').click();
+    await page.waitForTimeout(2000);
+
+    // Step 3: Open registration
+    const openRegBtn = page.locator('button:has-text("Anmeldung öffnen")');
+    if (await openRegBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await openRegBtn.click();
+      await page.waitForTimeout(1000);
+    }
+
+    // Step 4: Register test players via API
+    const token = await getAuthToken(page);
+    console.log('Auth token available:', !!token);
+
+    const playerIds = await createTestPlayers(token, 4);
+    console.log('Created player IDs:', playerIds);
+
+    await registerPlayersForTournament(token, tournamentId, playerIds);
+    console.log('Registered players for tournament');
+
+    // Reload to see participants
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+
+    // Step 5: Start tournament
+    const startTournamentBtn = page.locator('button:has-text("Turnier starten")');
+    if (await startTournamentBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await startTournamentBtn.click();
+      await page.waitForSelector('div[role="alertdialog"], div[role="dialog"]', { timeout: 5000 });
+      await page.locator('div[role="alertdialog"] button:has-text("Starten"), div[role="dialog"] button:has-text("Starten")').click();
+      await page.waitForTimeout(2000);
+    }
+
+    // Step 6: Go to Pairings tab on tournament detail page
+    const pairingsTab = page.locator('[role="tab"]:has-text("Paarungen")');
+    await pairingsTab.click();
+    await page.waitForTimeout(1000);
+
+    // Step 7: Generate pairings if not already generated
+    const generateBtn = page.locator('button:has-text("Paarungen erstellen")');
+    if (await generateBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await generateBtn.click();
+      await page.waitForTimeout(2000);
+    }
+
+    // Step 8: Check if pairings table exists
+    const pairingsTable = page.locator('table');
+    const hasPairings = await pairingsTable.isVisible({ timeout: 5000 }).catch(() => false);
+    console.log('Pairings table visible:', hasPairings);
+
+    if (!hasPairings) {
+      console.error('No pairings table found - cannot test result entry');
+      return;
+    }
+
+    // Step 9: Find the result entry button (Edit icon button)
+    const resultEntryBtn = page.locator('table button[aria-label="Ergebnis eintragen"]').first();
+    const hasResultBtn = await resultEntryBtn.isVisible({ timeout: 3000 }).catch(() => false);
+    console.log('Result entry button visible:', hasResultBtn);
+
+    if (!hasResultBtn) {
+      // Try alternative selector
+      const altResultBtn = page.locator('table button:has(svg.lucide-edit-2)').first();
+      const hasAltBtn = await altResultBtn.isVisible({ timeout: 2000 }).catch(() => false);
+      console.log('Alternative result entry button visible:', hasAltBtn);
+
+      if (!hasAltBtn) {
+        console.error('No result entry button found in pairings table');
+        // Log the table HTML for debugging
+        const tableHtml = await pairingsTable.innerHTML();
+        console.log('Pairings table HTML:', tableHtml.substring(0, 2000));
+        return;
+      }
+      await altResultBtn.click();
+    } else {
+      await resultEntryBtn.click();
+    }
+
+    // Step 10: Wait for dialog
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+    console.log('Result entry dialog opened');
+
+    // Step 11: Select a result (1-0)
+    const resultOption = page.locator('[role="dialog"] button:has-text("1-0")').first();
+    await resultOption.click();
+    console.log('Selected result: 1-0');
+
+    // Step 12: Click Save
+    const saveBtn = page.locator('[role="dialog"] button:has-text("Speichern")');
+    await saveBtn.click();
+    console.log('Clicked Save button');
+
+    // Step 13: Wait for response and check result
+    await page.waitForTimeout(3000);
+
+    // Check network logs
+    console.log('\n=== NETWORK LOGS ===');
+    for (const log of networkLogs) {
+      console.log(`${log.method} ${log.url}`);
+      console.log(`  Status: ${log.status}`);
+      console.log(`  Request Body: ${log.body}`);
+      console.log(`  Response: ${log.response}`);
+    }
+
+    // Check if there was a 400 error
+    const has400 = networkLogs.some(log => log.status === 400);
+    if (has400) {
+      const errorLog = networkLogs.find(log => log.status === 400);
+      console.error('\n!!! BUG-09 CONFIRMED: 400 error on result entry !!!');
+      console.error('Request body:', errorLog?.body);
+      console.error('Error response:', errorLog?.response);
+    } else if (networkLogs.some(log => log.status === 200 || log.status === 201)) {
+      console.log('\n=== RESULT ENTRY SUCCEEDED ===');
+    }
+
+    // Verify UI state
+    const toastError = page.locator('text=Fehler');
+    const hasError = await toastError.isVisible({ timeout: 2000 }).catch(() => false);
+    if (hasError) {
+      console.error('Error toast displayed');
+    }
+
+    const toastSuccess = page.locator('text=Ergebnis eingetragen');
+    const hasSuccess = await toastSuccess.isVisible({ timeout: 2000 }).catch(() => false);
+    if (hasSuccess) {
+      console.log('Success toast displayed - result entry worked!');
+    }
+  });
+
+  test('BUG-09: Direct API test for result entry', async ({ page }) => {
+    // This test directly calls the API to isolate the issue
+    await page.goto('/tournaments');
+    await page.waitForLoadState('networkidle');
+
+    const token = await getAuthToken(page);
+    console.log('Auth token:', token ? 'present' : 'missing');
+
+    // First, we need a game ID. Let's get one from an existing tournament
+    // Navigate to the specific tournament mentioned in the bug
+    const testTournamentId = 'e4e4c163-e762-4e5c-8d22-3bea090a1ba4';
+
+    // Get pairings
+    const pairingsResponse = await fetch(`${API_BASE}/tournaments/${testTournamentId}/rounds/1/pairings`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!pairingsResponse.ok) {
+      console.log('Could not fetch pairings for test tournament, creating new one...');
+      // If tournament doesn't exist, skip this test
+      return;
+    }
+
+    const pairingsData = await pairingsResponse.json();
+    console.log('Pairings response:', JSON.stringify(pairingsData, null, 2));
+
+    const games = pairingsData.games || [];
+    if (games.length === 0) {
+      console.log('No games found in pairings');
+      return;
+    }
+
+    const testGame = games[0];
+    console.log('Test game:', JSON.stringify(testGame, null, 2));
+    console.log('Game ID:', testGame.id);
+    console.log('Game ID type:', typeof testGame.id);
+
+    // Now test the result entry API directly
+    const resultRequestBody = {
+      gameId: testGame.id,
+      result: '1-0',
+    };
+    console.log('Request body:', JSON.stringify(resultRequestBody));
+
+    const resultResponse = await fetch(`${API_BASE}/results`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(resultRequestBody),
+    });
+
+    const resultStatus = resultResponse.status;
+    const resultBody = await resultResponse.text();
+
+    console.log('Result entry response:');
+    console.log('  Status:', resultStatus);
+    console.log('  Body:', resultBody);
+
+    if (resultStatus === 400) {
+      console.error('\n!!! BUG-09 CONFIRMED via direct API call !!!');
+      console.error('The backend is returning 400 for result entry');
+      console.error('This suggests a validation error in the request');
+
+      // Try to parse the error
+      try {
+        const errorJson = JSON.parse(resultBody);
+        console.error('Error message:', errorJson.error);
+      } catch (e) {
+        console.error('Raw error:', resultBody);
+      }
+    } else if (resultStatus === 200 || resultStatus === 201) {
+      console.log('Result entry succeeded via direct API call');
+    }
+  });
+});
+
+// ============================================================================
 // REGRESSION TESTS
 // ============================================================================
 

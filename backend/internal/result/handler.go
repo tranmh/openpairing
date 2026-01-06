@@ -37,9 +37,15 @@ func (h *Handler) EnterResult(c *gin.Context) {
 	}
 
 	// Get user ID from context (set by auth middleware)
-	userID, exists := c.Get("userID")
+	userIDStr, exists := c.Get("user_id")
 	if exists {
-		entry.EnteredBy = userID.(uuid.UUID)
+		if uid, ok := userIDStr.(uuid.UUID); ok {
+			entry.EnteredBy = uid
+		} else if uidStr, ok := userIDStr.(string); ok {
+			if uid, err := uuid.Parse(uidStr); err == nil {
+				entry.EnteredBy = uid
+			}
+		}
 	}
 
 	response, err := h.service.EnterResult(c.Request.Context(), &entry)
@@ -73,10 +79,16 @@ func (h *Handler) CorrectResult(c *gin.Context) {
 		return
 	}
 
-	// Get user ID from context
-	userID, exists := c.Get("userID")
+	// Get user ID from context (set by auth middleware)
+	userIDStr, exists := c.Get("user_id")
 	if exists {
-		correction.CorrectedBy = userID.(uuid.UUID)
+		if uid, ok := userIDStr.(uuid.UUID); ok {
+			correction.CorrectedBy = uid
+		} else if uidStr, ok := userIDStr.(string); ok {
+			if uid, err := uuid.Parse(uidStr); err == nil {
+				correction.CorrectedBy = uid
+			}
+		}
 	}
 
 	response, err := h.service.CorrectResult(c.Request.Context(), &correction)
@@ -120,11 +132,17 @@ func (h *Handler) DeleteResult(c *gin.Context) {
 		return
 	}
 
-	// Get user ID from context
+	// Get user ID from context (set by auth middleware)
 	var deletedBy uuid.UUID
-	userID, exists := c.Get("userID")
+	userIDStr, exists := c.Get("user_id")
 	if exists {
-		deletedBy = userID.(uuid.UUID)
+		if uid, ok := userIDStr.(uuid.UUID); ok {
+			deletedBy = uid
+		} else if uidStr, ok := userIDStr.(string); ok {
+			if uid, err := uuid.Parse(uidStr); err == nil {
+				deletedBy = uid
+			}
+		}
 	}
 
 	err = h.service.DeleteResult(c.Request.Context(), gameID, deletedBy, body.Reason)
@@ -282,11 +300,19 @@ func (h *Handler) EnterBulkResults(c *gin.Context) {
 		return
 	}
 
-	// Get user ID from context
-	userID, exists := c.Get("userID")
+	// Get user ID from context (set by auth middleware)
+	userIDStr, exists := c.Get("user_id")
 	if exists {
+		var enteredBy uuid.UUID
+		if uid, ok := userIDStr.(uuid.UUID); ok {
+			enteredBy = uid
+		} else if uidStr, ok := userIDStr.(string); ok {
+			if uid, err := uuid.Parse(uidStr); err == nil {
+				enteredBy = uid
+			}
+		}
 		for i := range bulk.Results {
-			bulk.Results[i].EnteredBy = userID.(uuid.UUID)
+			bulk.Results[i].EnteredBy = enteredBy
 		}
 	}
 

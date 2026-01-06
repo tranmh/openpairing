@@ -789,11 +789,22 @@ function ResultEntryButton({
 
   const enterResultMutation = useMutation({
     mutationFn: async (resultValue: string) => {
+      // Validate inputs before sending
+      if (!gameId) {
+        throw new Error('Keine Spiel-ID vorhanden');
+      }
+      if (!resultValue) {
+        throw new Error('Kein Ergebnis ausgewählt');
+      }
+      console.log('Entering result:', { gameId, result: resultValue });
       const response = await api.post('/results', {
         gameId,
         result: resultValue,
       });
-      if (response.error) throw new Error(response.error.message);
+      if (response.error) {
+        console.error('Result entry error:', response.error);
+        throw new Error(response.error.message || 'Unbekannter Fehler');
+      }
       return response.data;
     },
     onSuccess: () => {
@@ -803,6 +814,7 @@ function ResultEntryButton({
       setOpen(false);
     },
     onError: (error: Error) => {
+      console.error('Mutation error:', error);
       toast.error(error.message || 'Fehler beim Eintragen des Ergebnisses');
     },
   });
