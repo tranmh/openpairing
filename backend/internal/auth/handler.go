@@ -18,6 +18,24 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// setSecureCookie sets a cookie with proper security attributes including SameSite
+func setSecureCookie(c *gin.Context, name, value string, maxAge int, path string, secure, httpOnly bool) {
+	sameSite := http.SameSiteLaxMode
+	if secure {
+		sameSite = http.SameSiteStrictMode
+	}
+
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     name,
+		Value:    value,
+		MaxAge:   maxAge,
+		Path:     path,
+		Secure:   secure,
+		HttpOnly: httpOnly,
+		SameSite: sameSite,
+	})
+}
+
 // Register godoc
 // @Summary Register a new user
 // @Tags auth
@@ -108,16 +126,8 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
-	// Set refresh token as HTTP-only cookie
-	c.SetCookie(
-		"refresh_token",
-		tokens.RefreshToken,
-		60*60*24*7, // 7 days
-		"/",
-		"",
-		c.Request.TLS != nil, // Secure flag
-		true,                 // HTTP-only
-	)
+	// Set refresh token as HTTP-only cookie with SameSite protection
+	setSecureCookie(c, "refresh_token", tokens.RefreshToken, 60*60*24*7, "/", c.Request.TLS != nil, true)
 
 	response.Success(c, http.StatusOK, gin.H{
 		"user":        user,
@@ -138,8 +148,8 @@ func (h *Handler) Logout(c *gin.Context) {
 		_ = h.service.Logout(c.Request.Context(), refreshToken)
 	}
 
-	// Clear the refresh token cookie
-	c.SetCookie("refresh_token", "", -1, "/", "", c.Request.TLS != nil, true)
+	// Clear the refresh token cookie with SameSite protection
+	setSecureCookie(c, "refresh_token", "", -1, "/", c.Request.TLS != nil, true)
 	response.NoContent(c)
 }
 
@@ -161,8 +171,8 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 	if err != nil {
 		switch err {
 		case ErrInvalidToken, ErrExpiredToken, ErrTokenRevoked:
-			// Clear invalid cookie
-			c.SetCookie("refresh_token", "", -1, "/", "", c.Request.TLS != nil, true)
+			// Clear invalid cookie with SameSite protection
+			setSecureCookie(c, "refresh_token", "", -1, "/", c.Request.TLS != nil, true)
 			response.Unauthorized(c, "Invalid or expired refresh token")
 		default:
 			response.InternalServerError(c, "Failed to refresh token")
@@ -170,16 +180,8 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	// Update refresh token cookie
-	c.SetCookie(
-		"refresh_token",
-		tokens.RefreshToken,
-		60*60*24*7,
-		"/",
-		"",
-		c.Request.TLS != nil,
-		true,
-	)
+	// Update refresh token cookie with SameSite protection
+	setSecureCookie(c, "refresh_token", tokens.RefreshToken, 60*60*24*7, "/", c.Request.TLS != nil, true)
 
 	response.Success(c, http.StatusOK, gin.H{
 		"user":        user,

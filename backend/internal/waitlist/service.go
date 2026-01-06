@@ -121,6 +121,22 @@ func (s *Service) RemoveFromWaitlist(ctx context.Context, id uuid.UUID) error {
 
 // PromoteNextPlayer promotes the next player in the queue
 func (s *Service) PromoteNextPlayer(ctx context.Context, tournamentID uuid.UUID, req *PromoteFromWaitlistRequest) (*WaitlistEntry, error) {
+	// Check tournament capacity before promoting
+	info, err := s.repo.GetTournamentInfo(ctx, tournamentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tournament info: %w", err)
+	}
+
+	// If tournament has a max players limit, check capacity
+	if info.MaxPlayers != nil && info.Capacity >= *info.MaxPlayers {
+		s.logger.Info().
+			Str("tournament_id", tournamentID.String()).
+			Int("max_players", *info.MaxPlayers).
+			Int("capacity", info.Capacity).
+			Msg("Tournament is at capacity, cannot promote from waitlist")
+		return nil, ErrTournamentFull
+	}
+
 	// Get next in queue
 	entry, err := s.repo.GetNextInQueue(ctx, tournamentID)
 	if err != nil {
@@ -163,11 +179,15 @@ func (s *Service) PromoteNextPlayer(ctx context.Context, tournamentID uuid.UUID,
 	}
 
 	if req.AutoPromote {
-		// Automatically register the player (would need to call tournament service)
+		// IMPORTANT: Auto-promote registration MUST re-verify capacity atomically
+		// to prevent race conditions between the initial check above and actual registration.
+		// The tournament service registration should use an atomic SQL like:
+		//   INSERT INTO tournament_participants ... WHERE (SELECT COUNT(*) FROM ... ) < max_players
+		// For now, log the intent - actual registration handled by caller
 		s.logger.Info().
 			Str("entry_id", entry.ID.String()).
-			Msg("Auto-promoting player from waitlist")
-		// This would require dependency on tournament service
+			Str("player_id", entry.PlayerID.String()).
+			Msg("Auto-promote requested - caller must verify capacity atomically during registration")
 	}
 
 	return entry, nil
@@ -201,10 +221,22 @@ func (s *Service) ProcessExpiredEntries(ctx context.Context) (int, error) {
 			Msg("Removed expired waitlist entry")
 
 		// Notify next person in queue
-		_, _ = s.PromoteNextPlayer(ctx, entry.TournamentID, &PromoteFromWaitlistRequest{
+		_, err := s.PromoteNextPlayer(ctx, entry.TournamentID, &PromoteFromWaitlistRequest{
 			NotifyPlayer: true,
 			ExpiryHours:  48,
 		})
+		if err != nil {
+			if err == ErrTournamentFull {
+				s.logger.Info().
+					Str("tournament_id", entry.TournamentID.String()).
+					Msg("Tournament at capacity, not promoting next waitlist entry")
+			} else {
+				s.logger.Error().
+					Err(err).
+					Str("tournament_id", entry.TournamentID.String()).
+					Msg("Failed to promote next waitlist entry")
+			}
+		}
 
 		processed++
 	}

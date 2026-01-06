@@ -3,12 +3,28 @@ package export
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+// setContentDisposition sets a safe Content-Disposition header with proper filename quoting
+// to prevent header injection attacks (RFC 5987)
+func setContentDisposition(c *gin.Context, filename string) {
+	// Remove any characters that could break the header or allow injection
+	safeFilename := strings.Map(func(r rune) rune {
+		// Remove control characters, quotes, and newlines
+		if r < 32 || r == '"' || r == '\n' || r == '\r' {
+			return -1
+		}
+		return r
+	}, filename)
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", safeFilename))
+}
 
 // createZipArchive creates a ZIP archive containing multiple PDF files
 func createZipArchive(certificates []PDFExportResponse) ([]byte, error) {
@@ -71,7 +87,7 @@ func (h *Handler) ExportTournamentPGN(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	setContentDisposition(c, export.Filename)
 	c.Data(http.StatusOK, export.MimeType, []byte(export.Content))
 }
 
@@ -107,7 +123,7 @@ func (h *Handler) ExportRoundPGN(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	setContentDisposition(c, export.Filename)
 	c.Data(http.StatusOK, export.MimeType, []byte(export.Content))
 }
 
@@ -139,7 +155,7 @@ func (h *Handler) ExportGamePGN(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	setContentDisposition(c, export.Filename)
 	c.Data(http.StatusOK, export.MimeType, []byte(export.Content))
 }
 
@@ -171,7 +187,7 @@ func (h *Handler) ExportTournamentJSON(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	setContentDisposition(c, export.Filename)
 	c.Data(http.StatusOK, export.MimeType, []byte(export.Content))
 }
 
@@ -203,7 +219,7 @@ func (h *Handler) ExportStandingsCSV(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	setContentDisposition(c, export.Filename)
 	c.Data(http.StatusOK, export.MimeType, []byte(export.Content))
 }
 
@@ -235,7 +251,7 @@ func (h *Handler) ExportCrosstableCSV(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	setContentDisposition(c, export.Filename)
 	c.Data(http.StatusOK, export.MimeType, []byte(export.Content))
 }
 
@@ -267,7 +283,7 @@ func (h *Handler) ExportStandingsPDF(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	setContentDisposition(c, export.Filename)
 	c.Data(http.StatusOK, export.MimeType, export.Content)
 }
 
@@ -299,7 +315,7 @@ func (h *Handler) ExportCrosstablePDF(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	setContentDisposition(c, export.Filename)
 	c.Data(http.StatusOK, export.MimeType, export.Content)
 }
 
@@ -341,7 +357,7 @@ func (h *Handler) ExportParticipantCertificate(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	setContentDisposition(c, export.Filename)
 	c.Data(http.StatusOK, export.MimeType, export.Content)
 }
 
@@ -369,6 +385,11 @@ func (h *Handler) ExportTopCertificates(c *gin.Context) {
 			topN = n
 		}
 	}
+	// Prevent DoS: limit maximum certificates to prevent resource exhaustion
+	const maxCertificates = 100
+	if topN > maxCertificates {
+		topN = maxCertificates
+	}
 
 	certificates, err := h.service.GenerateAllCertificates(c.Request.Context(), tournamentID, topN)
 	if err != nil {
@@ -383,7 +404,7 @@ func (h *Handler) ExportTopCertificates(c *gin.Context) {
 
 	// If only one certificate, return it directly
 	if len(certificates) == 1 {
-		c.Header("Content-Disposition", "attachment; filename="+certificates[0].Filename)
+		setContentDisposition(c, certificates[0].Filename)
 		c.Data(http.StatusOK, certificates[0].MimeType, certificates[0].Content)
 		return
 	}
@@ -427,7 +448,7 @@ func (h *Handler) ExportParticipantListPDF(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	setContentDisposition(c, export.Filename)
 	c.Data(http.StatusOK, export.MimeType, export.Content)
 }
 
@@ -467,6 +488,6 @@ func (h *Handler) ExportPairingsPDF(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", "attachment; filename="+export.Filename)
+	setContentDisposition(c, export.Filename)
 	c.Data(http.StatusOK, export.MimeType, export.Content)
 }

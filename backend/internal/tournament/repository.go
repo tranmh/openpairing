@@ -439,6 +439,27 @@ func (r *PostgresRepository) AddParticipant(ctx context.Context, p *Participant)
 	}
 	defer tx.Rollback(ctx)
 
+	// Atomically check capacity with row lock to prevent race conditions
+	var maxPlayers *int
+	var participantCount int
+	err = tx.QueryRow(ctx, `
+		SELECT max_players, COALESCE(participant_count, 0)
+		FROM tournaments
+		WHERE id = $1
+		FOR UPDATE
+	`, p.TournamentID).Scan(&maxPlayers, &participantCount)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrTournamentNotFound
+		}
+		return fmt.Errorf("failed to check tournament capacity: %w", err)
+	}
+
+	// Check if tournament is at capacity
+	if maxPlayers != nil && participantCount >= *maxPlayers {
+		return ErrTournamentFull
+	}
+
 	query := `
 		INSERT INTO tournament_participants (
 			id, tournament_id, section_id, player_id,

@@ -227,13 +227,21 @@ func (s *Service) ResendVerificationEmail(ctx context.Context, userID string) er
 func (s *Service) VerifyEmail(ctx context.Context, token string) error {
 	tokenHash := hashToken(token)
 
-	// Get and validate token
+	// Start transaction first to ensure atomicity
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Get and validate token with row lock to prevent TOCTOU race
 	var userID string
 	var expiresAt time.Time
 	var usedAt *time.Time
-	err := s.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT user_id, expires_at, used_at FROM email_verification_tokens
 		WHERE token_hash = $1
+		FOR UPDATE
 	`, tokenHash).Scan(&userID, &expiresAt, &usedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -246,22 +254,15 @@ func (s *Service) VerifyEmail(ctx context.Context, token string) error {
 		return ErrInvalidVerificationToken
 	}
 
-	// Check if already verified
+	// Check if already verified (within transaction)
 	var emailVerified bool
-	err = s.db.QueryRow(ctx, "SELECT email_verified FROM users WHERE id = $1", userID).Scan(&emailVerified)
+	err = tx.QueryRow(ctx, "SELECT email_verified FROM users WHERE id = $1 FOR UPDATE", userID).Scan(&emailVerified)
 	if err != nil {
 		return err
 	}
 	if emailVerified {
 		return ErrEmailAlreadyVerified
 	}
-
-	// Start transaction
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
 
 	// Update user as verified
 	_, err = tx.Exec(ctx, `
@@ -487,13 +488,27 @@ func (s *Service) RequestPasswordReset(ctx context.Context, email string) (strin
 func (s *Service) ResetPassword(ctx context.Context, token, newPassword string) error {
 	tokenHash := hashToken(token)
 
-	// Get and validate token
+	// Hash new password first (outside transaction to avoid long lock)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), s.bcryptCost)
+	if err != nil {
+		return err
+	}
+
+	// Start transaction first to ensure atomicity
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Get and validate token with row lock to prevent TOCTOU race
 	var userID string
 	var expiresAt time.Time
 	var usedAt *time.Time
-	err := s.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT user_id, expires_at, used_at FROM password_reset_tokens
 		WHERE token_hash = $1
+		FOR UPDATE
 	`, tokenHash).Scan(&userID, &expiresAt, &usedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -505,19 +520,6 @@ func (s *Service) ResetPassword(ctx context.Context, token, newPassword string) 
 	if usedAt != nil || time.Now().After(expiresAt) {
 		return ErrInvalidResetToken
 	}
-
-	// Hash new password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), s.bcryptCost)
-	if err != nil {
-		return err
-	}
-
-	// Start transaction
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
 
 	// Update password
 	_, err = tx.Exec(ctx, "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2", string(hashedPassword), userID)

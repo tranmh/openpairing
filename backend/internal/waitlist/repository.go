@@ -15,6 +15,7 @@ var (
 	ErrEntryNotFound     = errors.New("waitlist entry not found")
 	ErrAlreadyOnWaitlist = errors.New("player is already on the waitlist")
 	ErrAlreadyRegistered = errors.New("player is already registered for this tournament")
+	ErrTournamentFull    = errors.New("tournament has reached maximum capacity")
 )
 
 // Repository defines the waitlist data access interface
@@ -47,20 +48,15 @@ func (r *PostgresRepository) Add(ctx context.Context, entry *WaitlistEntry) erro
 	entry.ID = uuid.New()
 	entry.CreatedAt = time.Now()
 
-	// Get the next position
-	var maxPosition int
+	// Atomically calculate next position and insert in one query to prevent race conditions
+	// Two concurrent calls could otherwise get the same max position and create duplicates
 	err := r.db.QueryRow(ctx, `
-		SELECT COALESCE(MAX(position), 0) FROM tournament_waitlist WHERE tournament_id = $1
-	`, entry.TournamentID).Scan(&maxPosition)
-	if err != nil {
-		return err
-	}
-	entry.Position = maxPosition + 1
-
-	_, err = r.db.Exec(ctx, `
 		INSERT INTO tournament_waitlist (id, tournament_id, player_id, position, starting_rating, notes, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, entry.ID, entry.TournamentID, entry.PlayerID, entry.Position, entry.StartingRating, entry.Notes, entry.CreatedAt)
+		VALUES ($1, $2, $3,
+			(SELECT COALESCE(MAX(position), 0) + 1 FROM tournament_waitlist WHERE tournament_id = $2),
+			$4, $5, $6)
+		RETURNING position
+	`, entry.ID, entry.TournamentID, entry.PlayerID, entry.StartingRating, entry.Notes, entry.CreatedAt).Scan(&entry.Position)
 
 	if err != nil {
 		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" {

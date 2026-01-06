@@ -1231,12 +1231,14 @@ func (s *Service) RecalculateTiebreaks(ctx context.Context, tournamentID uuid.UU
 					result.Score = *g.BlackScore
 				}
 				result.PlayedWhite = false
-				playerData.GamesAsBlack++
-				// Use scoring settings instead of hardcoded value to correctly count wins with black
-				if result.Score == scoring.WinPoints {
-					playerData.WinsAsBlack++
-				}
+				// Only count GamesAsBlack when there's an actual opponent (consistent with standings service)
 				if g.WhiteParticipantID != nil {
+					playerData.GamesAsBlack++
+					// Use scoring settings instead of hardcoded value to correctly count wins with black
+					// Check against actual score, not result.Score which could be zero if BlackScore is nil
+					if g.BlackScore != nil && *g.BlackScore == scoring.WinPoints {
+						playerData.WinsAsBlack++
+					}
 					result.OpponentID = *g.WhiteParticipantID
 					for _, op := range participants {
 						if op.ID == *g.WhiteParticipantID {

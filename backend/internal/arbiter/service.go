@@ -667,7 +667,14 @@ func (s *Service) CorrectResult(ctx context.Context, req *CorrectResultRequest, 
 			}
 			// Add new score
 			white.Points += whiteScore
-			s.tournamentRepo.UpdateParticipant(ctx, white)
+			if err := s.tournamentRepo.UpdateParticipant(ctx, white); err != nil {
+				s.logger.Error().
+					Err(err).
+					Str("participant_id", white.ID.String()).
+					Float64("expected_points", white.Points).
+					Msg("Failed to update white participant score - data may be inconsistent")
+				return fmt.Errorf("failed to update white participant score: %w", err)
+			}
 		}
 	}
 
@@ -680,7 +687,14 @@ func (s *Service) CorrectResult(ctx context.Context, req *CorrectResultRequest, 
 			}
 			// Add new score
 			black.Points += blackScore
-			s.tournamentRepo.UpdateParticipant(ctx, black)
+			if err := s.tournamentRepo.UpdateParticipant(ctx, black); err != nil {
+				s.logger.Error().
+					Err(err).
+					Str("participant_id", black.ID.String()).
+					Float64("expected_points", black.Points).
+					Msg("Failed to update black participant score - data may be inconsistent")
+				return fmt.Errorf("failed to update black participant score: %w", err)
+			}
 		}
 	}
 
@@ -757,9 +771,19 @@ func (s *Service) SwapPairing(ctx context.Context, req *SwapPairingRequest, arbi
 		return fmt.Errorf("game 1 not found: %w", err)
 	}
 
+	// Verify game1 belongs to the specified tournament
+	if game1.TournamentID != req.TournamentID {
+		return fmt.Errorf("game 1 does not belong to the specified tournament")
+	}
+
 	game2, err := s.tournamentRepo.GetGame(ctx, req.Game2ID)
 	if err != nil {
 		return fmt.Errorf("game 2 not found: %w", err)
+	}
+
+	// Verify game2 belongs to the specified tournament
+	if game2.TournamentID != req.TournamentID {
+		return fmt.Errorf("game 2 does not belong to the specified tournament")
 	}
 
 	// Determine which position each player is in and swap
@@ -866,7 +890,14 @@ func (s *Service) DeletePairing(ctx context.Context, req *DeletePairingRequest, 
 		white, err := s.tournamentRepo.GetParticipant(ctx, *game.WhiteParticipantID)
 		if err == nil && white != nil {
 			white.Points -= *game.WhiteScore
-			s.tournamentRepo.UpdateParticipant(ctx, white)
+			if err := s.tournamentRepo.UpdateParticipant(ctx, white); err != nil {
+				s.logger.Error().
+					Err(err).
+					Str("participant_id", white.ID.String()).
+					Float64("expected_points", white.Points).
+					Msg("Failed to reverse bye score - data may be inconsistent")
+				return fmt.Errorf("failed to reverse bye score: %w", err)
+			}
 		}
 	} else if game.Result != nil && *game.Result != "" {
 		// For non-bye games, don't allow deletion if result is already entered
@@ -1046,7 +1077,14 @@ func (s *Service) CreateManualPairing(ctx context.Context, req *CreateManualPair
 
 		// Update white participant points
 		white.Points += byeScore
-		s.tournamentRepo.UpdateParticipant(ctx, white)
+		if err := s.tournamentRepo.UpdateParticipant(ctx, white); err != nil {
+			s.logger.Error().
+				Err(err).
+				Str("participant_id", white.ID.String()).
+				Float64("expected_points", white.Points).
+				Msg("Failed to update participant bye points")
+			return nil, fmt.Errorf("failed to update participant bye points: %w", err)
+		}
 	}
 
 	if err := s.tournamentRepo.CreateGames(ctx, []tournament.Game{game}); err != nil {

@@ -183,11 +183,13 @@ func (c *Calculator) buchholz(player *PlayerData, cutLowest int) float64 {
 	}
 
 	// Handle unplayed rounds (virtual opponents)
-	for i := len(opponentPoints); i < c.rounds; i++ {
-		// Virtual opponent gets points based on player's result
-		// If player got a bye, virtual opponent has average points
-		avgPoints := player.Points / float64(len(player.Results))
-		opponentPoints = append(opponentPoints, avgPoints*float64(c.rounds)/float64(len(player.Results)))
+	// According to FIDE tiebreak rules, for unplayed games the virtual opponent
+	// should have points equal to the player's current average points per game
+	if len(player.Results) > 0 {
+		avgPointsPerGame := player.Points / float64(len(player.Results))
+		for i := len(opponentPoints); i < c.rounds; i++ {
+			opponentPoints = append(opponentPoints, avgPointsPerGame)
+		}
 	}
 
 	// Sort to find lowest scores
@@ -253,7 +255,13 @@ func (c *Calculator) sonnebornBerger(player *PlayerData) float64 {
 				sum += result.OpponentPts / 2
 			} else {
 				// Proportional: based on point ratio (draw/win)
-				sum += result.OpponentPts * (c.scoring.DrawPoints / c.scoring.WinPoints)
+				// Guard against division by zero (invalid scoring config)
+				if c.scoring.WinPoints > 0 {
+					sum += result.OpponentPts * (c.scoring.DrawPoints / c.scoring.WinPoints)
+				} else {
+					// Fallback to traditional mode if WinPoints is invalid
+					sum += result.OpponentPts / 2
+				}
 			}
 		}
 		// Losses contribute 0
