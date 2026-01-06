@@ -4,6 +4,7 @@
 BACKEND_DIR := backend
 FRONTEND_DIR := frontend
 BIN_DIR := bin
+TOOLS_DIR := tools
 
 # Default target
 all: lint test build
@@ -25,11 +26,16 @@ help:
 	@echo "  make seed         - Seed database with demo data"
 	@echo "  make seed-force   - Force seed (clear existing data)"
 	@echo ""
+	@echo "Pairing tools ($(TOOLS_DIR)/):"
+	@echo "  - javafo.jar       - JaVaFo Swiss pairing engine"
+	@echo "  - bbpPairings.exe  - bbpPairings Swiss pairing engine"
+	@echo ""
 
 # Development
 dev: docker-up
 	@echo "Starting development servers..."
-	@cd $(BACKEND_DIR) && go run ./cmd/api &
+	@echo "Pairing tools: $(TOOLS_DIR)/javafo.jar, $(TOOLS_DIR)/bbpPairings.exe"
+	@cd $(BACKEND_DIR) && JAVAFO_PATH=$(PWD)/$(TOOLS_DIR)/javafo.jar BBP_PATH=$(PWD)/$(TOOLS_DIR)/bbpPairings.exe go run ./cmd/api &
 	@cd $(FRONTEND_DIR) && npm run dev
 
 # Build targets
@@ -53,7 +59,7 @@ test: test-backend test-frontend
 
 test-backend:
 	@echo "Running backend tests..."
-	cd $(BACKEND_DIR) && go test -v -race -coverprofile=coverage.out ./...
+	cd $(BACKEND_DIR) && JAVAFO_JAR_PATH=$(PWD)/$(TOOLS_DIR)/javafo.jar BBP_PATH=$(PWD)/$(TOOLS_DIR)/bbpPairings.exe go test -v -race -coverprofile=coverage.out ./...
 
 test-frontend:
 	@echo "Running frontend tests..."

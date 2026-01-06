@@ -23,6 +23,7 @@ DATA_DIR="/var/lib/openpairing"
 LOG_DIR="/var/log/openpairing"
 CONFIG_DIR="/etc/openpairing"
 CREDENTIALS_FILE="$CONFIG_DIR/credentials"
+TOOLS_DIR="$INSTALL_DIR/tools"
 
 # Service ports
 API_PORT=8080
@@ -275,12 +276,35 @@ install_migrate() {
 create_directories() {
     log_info "Creating directories..."
 
-    mkdir -p "$INSTALL_DIR"/{bin,frontend}
+    mkdir -p "$INSTALL_DIR"/{bin,frontend,tools}
     mkdir -p "$DATA_DIR"/{postgres,redis,uploads,federation}
     mkdir -p "$LOG_DIR"
     mkdir -p "$CONFIG_DIR"
 
     log_info "Directories created"
+}
+
+install_pairing_tools() {
+    log_info "Installing pairing engine tools..."
+
+    # Copy JaVaFo
+    if [ -f "$PROJECT_DIR/tools/javafo.jar" ]; then
+        cp "$PROJECT_DIR/tools/javafo.jar" "$TOOLS_DIR/"
+        log_info "JaVaFo installed: $TOOLS_DIR/javafo.jar"
+    else
+        log_warn "JaVaFo not found at $PROJECT_DIR/tools/javafo.jar"
+    fi
+
+    # Copy bbpPairings
+    if [ -f "$PROJECT_DIR/tools/bbpPairings.exe" ]; then
+        cp "$PROJECT_DIR/tools/bbpPairings.exe" "$TOOLS_DIR/"
+        chmod +x "$TOOLS_DIR/bbpPairings.exe"
+        log_info "bbpPairings installed: $TOOLS_DIR/bbpPairings.exe"
+    else
+        log_warn "bbpPairings not found at $PROJECT_DIR/tools/bbpPairings.exe"
+    fi
+
+    log_info "Pairing tools installation completed"
 }
 
 setup_postgres() {
@@ -513,6 +537,10 @@ FEDERATION_ENABLE_FIDE=false
 FEDERATION_ENABLE_DSB=false
 FEDERATION_ENABLE_OESB=false
 FEDERATION_ENABLE_SSB=false
+
+# Pairing Engines
+JAVAFO_PATH=$TOOLS_DIR/javafo.jar
+BBP_PATH=$TOOLS_DIR/bbpPairings.exe
 EOF
 
     chmod 600 "$INSTALL_DIR/.env"
@@ -709,6 +737,10 @@ print_summary() {
     echo "  - Email:    admin@openpairing.org"
     echo "  - Password: admin123"
     echo ""
+    echo "Pairing tools:"
+    echo "  - JaVaFo:      $TOOLS_DIR/javafo.jar"
+    echo "  - bbpPairings: $TOOLS_DIR/bbpPairings.exe"
+    echo ""
     echo "Configuration files:"
     echo "  - Environment: $INSTALL_DIR/.env"
     echo "  - Credentials: $CREDENTIALS_FILE"
@@ -750,6 +782,7 @@ main() {
     install_nodejs
     install_migrate
     create_directories
+    install_pairing_tools
     setup_postgres
     setup_redis
     run_migrations
