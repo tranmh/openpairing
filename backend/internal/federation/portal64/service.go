@@ -89,6 +89,8 @@ func (s *Service) SearchPlayers(ctx context.Context, query string, limit int) ([
 }
 
 // GetPlayer retrieves a player by PKZ from cache or API (does NOT persist to DB)
+// Note: This method first searches by PKZ, then fetches complete data by VKZ ID
+// to ensure DWZ ratings are included (search results may have incomplete rating data)
 func (s *Service) GetPlayer(ctx context.Context, pkz string) (*Player, error) {
 	cacheKey := fmt.Sprintf("player:%s", pkz)
 
@@ -102,9 +104,28 @@ func (s *Service) GetPlayer(ctx context.Context, pkz string) (*Player, error) {
 	}
 
 	// Try to find by PKZ via search
-	p, err := s.client.SearchPlayersByPKZ(ctx, pkz)
+	searchResult, err := s.client.SearchPlayersByPKZ(ctx, pkz)
 	if err != nil {
 		return nil, err
+	}
+
+	// If the search result has a VKZ ID, fetch complete data via GetPlayerByID
+	// This ensures we get DWZ ratings which may be missing from search results
+	var p *Player
+	if searchResult.ID != "" && strings.Contains(searchResult.ID, "-") {
+		s.logger.Debug().
+			Str("pkz", pkz).
+			Str("vkz_id", searchResult.ID).
+			Msg("Fetching complete player data by VKZ ID for DWZ ratings")
+
+		p, err = s.client.GetPlayer(ctx, searchResult.ID)
+		if err != nil {
+			// Fall back to search result if direct lookup fails
+			s.logger.Warn().Err(err).Str("id", searchResult.ID).Msg("Failed to fetch by VKZ ID, using search result")
+			p = searchResult
+		}
+	} else {
+		p = searchResult
 	}
 
 	// Cache the result
