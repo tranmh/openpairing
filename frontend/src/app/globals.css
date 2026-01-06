@@ -270,6 +270,43 @@
     padding: 3px 5px !important;
   }
 
+  /* Tournament info cards - compact inline layout for print */
+  .print-info-cards {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 0 !important;
+    margin-bottom: 8px !important;
+  }
+
+  .print-info-cards > * {
+    flex: 0 0 auto !important;
+    padding: 0 12px 0 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    background: transparent !important;
+  }
+
+  .print-info-cards [class*="CardHeader"] {
+    padding: 0 !important;
+    display: inline !important;
+  }
+
+  .print-info-cards [class*="CardTitle"] {
+    display: inline !important;
+    font-size: 8pt !important;
+  }
+
+  .print-info-cards [class*="CardTitle"]::after {
+    content: ": " !important;
+  }
+
+  .print-info-cards [class*="CardContent"] {
+    padding: 0 !important;
+    display: inline !important;
+    font-size: 9pt !important;
+    font-weight: bold !important;
+  }
+
   /* Hide scrollbars */
   * {
     overflow: visible !important;

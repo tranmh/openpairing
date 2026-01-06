@@ -310,8 +310,8 @@ export default function TournamentDetailPage() {
         </div>
       </div>
 
-      {/* Info cards - hidden in print */}
-      <div className="grid gap-4 md:grid-cols-4 no-print">
+      {/* Info cards - compact in print */}
+      <div className="grid gap-4 md:grid-cols-4 print-info-cards">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
