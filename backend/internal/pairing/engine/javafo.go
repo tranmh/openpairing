@@ -313,3 +313,15 @@ func (j *JaVaFo) SupportsAcceleration() bool {
 func (j *JaVaFo) SupportedSystems() []string {
 	return []string{"dutch", "burstein", "dubov"}
 }
+
+// GetTRFGenerator returns a TRF generator configured for JaVaFo's requirements.
+// JaVaFo uses TRFx format which:
+//   - Fails on unrecognized header codes (062, 072, 082, 092, 102, 112)
+//   - Requires XXR record for round count
+//   - XXC records are optional
+func (j *JaVaFo) GetTRFGenerator() trf.TRFGenerator {
+	return trf.NewJaVaFoGenerator()
+}
+
+// Verify JaVaFo implements TRFAwarePairingEngine
+var _ TRFAwarePairingEngine = (*JaVaFo)(nil)

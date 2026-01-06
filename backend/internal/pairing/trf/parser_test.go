@@ -3,14 +3,14 @@ package trf
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseTRF_ValidFile(t *testing.T) {
 	// Use generator to create properly formatted TRF content
 	gen := NewGenerator()
 	gen.SetTournamentInfo("Test Tournament 2024", "Berlin", "GER", 7)
-	gen.trf.StartDate = "2024/01/15"
-	gen.trf.EndDate = "2024/01/20"
+	gen.SetDates(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC), time.Date(2024, 1, 20, 0, 0, 0, 0, time.UTC))
 	gen.SetTournamentType("Swiss")
 	gen.SetArbiters("IA John Smith", nil)
 	gen.SetTimeControl("90+30")
@@ -119,8 +119,9 @@ func TestParseTRF_ValidFile(t *testing.T) {
 }
 
 func TestParseTRF_PlayerLine(t *testing.T) {
-	// Generate a properly formatted player line
-	gen := NewGenerator()
+	// Generate a properly formatted player line using JaVaFoGenerator
+	gen := NewJaVaFoGenerator()
+	gen.SetTournamentInfo("Test", "", "", 5)
 	player := TRFPlayer{
 		StartNo:    1,
 		Sex:        "m",
@@ -137,7 +138,21 @@ func TestParseTRF_PlayerLine(t *testing.T) {
 			{Round: 2, Color: "b", Result: "0", OpponentNo: 3},
 		},
 	}
-	line := gen.generatePlayerLine(player)
+	gen.AddPlayer(player)
+
+	// Generate TRF and extract the player line
+	output := gen.Generate()
+	var line string
+	for _, l := range strings.Split(output, "\n") {
+		if strings.HasPrefix(l, "001") {
+			line = l
+			break
+		}
+	}
+
+	if line == "" {
+		t.Fatal("No player line found in generated TRF")
+	}
 
 	parser := NewParser()
 	parsed, err := parser.parsePlayerLine(line)
@@ -171,9 +186,7 @@ func TestParseTRF_PlayerLine(t *testing.T) {
 }
 
 func TestParseTRF_RoundResult(t *testing.T) {
-	// Use generator to create properly formatted round results
-	gen := NewGenerator()
-
+	// Test round results by generating TRF with specific results
 	tests := []struct {
 		name      string
 		input     TRFRoundResult
@@ -191,18 +204,48 @@ func TestParseTRF_RoundResult(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Generate the round result string using the generator
-			data := gen.generateRoundResult(tt.input)
-			result := parser.parseRoundResult(1, data)
+			// Generate TRF with a player that has this round result
+			gen := NewJaVaFoGenerator()
+			gen.SetTournamentInfo("Test", "", "", 5)
+			gen.AddPlayer(TRFPlayer{
+				StartNo:      1,
+				Name:         "Test Player",
+				RoundResults: []TRFRoundResult{tt.input},
+			})
+			output := gen.Generate()
 
+			// Extract player line
+			var line string
+			for _, l := range strings.Split(output, "\n") {
+				if strings.HasPrefix(l, "001") {
+					line = l
+					break
+				}
+			}
+
+			if line == "" {
+				t.Fatal("No player line found")
+			}
+
+			// Parse the player line
+			parsed, err := parser.parsePlayerLine(line)
+			if err != nil {
+				t.Fatalf("parsePlayerLine failed: %v", err)
+			}
+
+			if len(parsed.RoundResults) < 1 {
+				t.Fatal("No round results parsed")
+			}
+
+			result := parsed.RoundResults[0]
 			if result.Color != tt.expColor {
-				t.Errorf("Color = %q, want %q (data=%q)", result.Color, tt.expColor, data)
+				t.Errorf("Color = %q, want %q", result.Color, tt.expColor)
 			}
 			if result.Result != tt.expResult {
-				t.Errorf("Result = %q, want %q (data=%q)", result.Result, tt.expResult, data)
+				t.Errorf("Result = %q, want %q", result.Result, tt.expResult)
 			}
 			if result.OpponentNo != tt.expOpp {
-				t.Errorf("OpponentNo = %d, want %d (data=%q)", result.OpponentNo, tt.expOpp, data)
+				t.Errorf("OpponentNo = %d, want %d", result.OpponentNo, tt.expOpp)
 			}
 		})
 	}
@@ -248,34 +291,34 @@ func TestGetPairings(t *testing.T) {
 	gen.SetTournamentInfo("Test Tournament", "", "", 5)
 
 	gen.AddPlayer(TRFPlayer{
-		StartNo:    1,
-		Name:       "Player One",
-		Rating:     2000,
-		BirthDate:  "1990/01/01",
-		Points:     1.0,
-		Rank:       1,
+		StartNo:   1,
+		Name:      "Player One",
+		Rating:    2000,
+		BirthDate: "1990/01/01",
+		Points:    1.0,
+		Rank:      1,
 		RoundResults: []TRFRoundResult{
 			{Round: 1, Color: "w", Result: "1", OpponentNo: 2},
 		},
 	})
 	gen.AddPlayer(TRFPlayer{
-		StartNo:    2,
-		Name:       "Player Two",
-		Rating:     1900,
-		BirthDate:  "1990/01/01",
-		Points:     0.0,
-		Rank:       2,
+		StartNo:   2,
+		Name:      "Player Two",
+		Rating:    1900,
+		BirthDate: "1990/01/01",
+		Points:    0.0,
+		Rank:      2,
 		RoundResults: []TRFRoundResult{
 			{Round: 1, Color: "b", Result: "0", OpponentNo: 1},
 		},
 	})
 	gen.AddPlayer(TRFPlayer{
-		StartNo:    3,
-		Name:       "Player Three",
-		Rating:     1800,
-		BirthDate:  "1990/01/01",
-		Points:     0.5,
-		Rank:       3,
+		StartNo:   3,
+		Name:      "Player Three",
+		Rating:    1800,
+		BirthDate: "1990/01/01",
+		Points:    0.5,
+		Rank:      3,
 		RoundResults: []TRFRoundResult{
 			{Round: 1, Color: "-", Result: "H", OpponentNo: 0},
 		},

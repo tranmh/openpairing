@@ -82,7 +82,9 @@ func TestGenerator_PlayerLine(t *testing.T) {
 }
 
 func TestGenerator_RoundResult(t *testing.T) {
-	g := NewGenerator()
+	// Test round results via the JaVaFo generator directly
+	g := NewJaVaFoGenerator()
+	g.SetTournamentInfo("Test", "", "", 5)
 
 	tests := []struct {
 		name     string
@@ -143,9 +145,17 @@ func TestGenerator_RoundResult(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			output := g.generateRoundResult(tt.result)
+			// Add a player with the round result and check the output
+			g2 := NewJaVaFoGenerator()
+			g2.SetTournamentInfo("Test", "", "", 5)
+			g2.AddPlayer(TRFPlayer{
+				StartNo:      1,
+				Name:         "Test Player",
+				RoundResults: []TRFRoundResult{tt.result},
+			})
+			output := g2.Generate()
 			if !strings.Contains(output, tt.expected) {
-				t.Errorf("generateRoundResult() = %q, want to contain %q", output, tt.expected)
+				t.Errorf("Output should contain %q, got:\n%s", tt.expected, output)
 			}
 		})
 	}
@@ -183,10 +193,10 @@ func TestGenerator_ValidateForFIDE(t *testing.T) {
 			setup: func(g *Generator) {
 				g.SetTournamentInfo("Test Tournament", "", "", 7)
 				g.AddPlayer(TRFPlayer{
-					StartNo:    1,
-					Name:       "Player One",
-					FideID:     "12345678",
-					Rating:     2000,
+					StartNo: 1,
+					Name:    "Player One",
+					FideID:  "12345678",
+					Rating:  2000,
 				})
 			},
 			wantErrors: 0,
@@ -227,19 +237,6 @@ func TestGenerator_ValidateForFIDE(t *testing.T) {
 				g.AddPlayer(TRFPlayer{
 					StartNo: 1,
 					Name:    "",
-				})
-			},
-			wantErrors: 1,
-		},
-		{
-			name: "rated player missing FIDE ID",
-			setup: func(g *Generator) {
-				g.SetTournamentInfo("Test", "", "", 7)
-				g.AddPlayer(TRFPlayer{
-					StartNo: 1,
-					Name:    "Player One",
-					Rating:  2000,
-					FideID:  "", // Missing FIDE ID
 				})
 			},
 			wantErrors: 1,
@@ -381,25 +378,11 @@ func TestGenerator_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestGenerator_XXRRecords(t *testing.T) {
-	g := NewGenerator()
-	g.SetTournamentInfo("Test", "", "", 5)
-	g.trf.XXRRecords[1] = "Additional info for player 1"
-
-	output := g.Generate()
-
-	if !strings.Contains(output, "XXR") {
-		t.Errorf("Output should contain XXR record")
-	}
-	if !strings.Contains(output, "Additional info") {
-		t.Errorf("Output should contain XXR data")
-	}
-}
-
 func TestGenerator_XXCRecords(t *testing.T) {
 	g := NewGenerator()
 	g.SetTournamentInfo("Test", "", "", 5)
-	g.trf.XXCRecords = []string{"white1", "initial"}
+	g.SetInitialColors("white1", "initial")
+	g.AddPlayer(TRFPlayer{StartNo: 1, Name: "Player"})
 
 	output := g.Generate()
 

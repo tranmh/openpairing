@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openpairing/openpairing/internal/pairing/trf"
 	"github.com/rs/zerolog"
 )
 
@@ -62,14 +63,11 @@ func (b *BBPPairings) GeneratePairings(ctx context.Context, req *PairingRequest)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Write input TRF file with XXC record for initial colors
+	// Write input TRF file
+	// NOTE: The TRF data should already contain XXC record from BBPGenerator.
+	// If using GetTRFGenerator(), BBPGenerator automatically adds XXC.
 	inputPath := filepath.Join(tmpDir, "input.trf")
-	trfContent := req.TRFData
-	// Add XXC record if not present
-	if !strings.Contains(trfContent, "XXC ") {
-		trfContent = strings.Replace(trfContent, "XXR ", "XXC white1\nXXR ", 1)
-	}
-	if err := os.WriteFile(inputPath, []byte(trfContent), 0644); err != nil {
+	if err := os.WriteFile(inputPath, []byte(req.TRFData), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write input file: %w", err)
 	}
 
@@ -207,3 +205,15 @@ func (b *BBPPairings) IsAvailable(ctx context.Context) bool {
 	}
 	return true
 }
+
+// GetTRFGenerator returns a TRF generator configured for bbpPairings' requirements.
+// bbpPairings uses TRFbx format which:
+//   - REQUIRES XXC record for initial color configuration
+//   - Validates player scores strictly against tournament results
+//   - Only supports Dutch and Burstein pairing systems
+func (b *BBPPairings) GetTRFGenerator() trf.TRFGenerator {
+	return trf.NewBBPGenerator()
+}
+
+// Verify BBPPairings implements TRFAwarePairingEngine
+var _ TRFAwarePairingEngine = (*BBPPairings)(nil)

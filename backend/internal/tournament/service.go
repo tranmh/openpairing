@@ -796,15 +796,13 @@ func stringPtr(s string) *string {
 	return &s
 }
 
-func (s *Service) generateTRFForPairing(ctx context.Context, tournament *Tournament, roundNumber int) (string, error) {
+func (s *Service) generateTRFForPairing(ctx context.Context, tournament *Tournament, roundNumber int, generator trf.TRFGenerator) (string, error) {
 	participants, err := s.GetParticipants(ctx, tournament.ID, &ParticipantFilter{
 		ActiveOnly: true,
 	})
 	if err != nil {
 		return "", err
 	}
-
-	generator := trf.NewGenerator()
 	city := ""
 	if tournament.VenueCity != nil {
 		city = *tournament.VenueCity
@@ -850,8 +848,14 @@ func (s *Service) generateTRFForPairing(ctx context.Context, tournament *Tournam
 				continue
 			}
 
+			// Look up round to get the correct round number
+			round, err := s.repo.GetRound(ctx, g.RoundID)
+			if err != nil || round == nil {
+				continue
+			}
+
 			result := trf.TRFRoundResult{
-				Round: g.BoardNumber, // This should be round number, needs fixing
+				Round: round.RoundNumber,
 			}
 
 			// Handle BYE games
@@ -1715,18 +1719,12 @@ func (s *Service) generateTeamSwissPairings(ctx context.Context, tournament *Tou
 
 // generateSwissPairings generates pairings for Swiss tournaments using TRF-based engines
 func (s *Service) generateSwissPairings(ctx context.Context, tournament *Tournament, roundNumber int) (*engine.PairingResult, error) {
-	// Generate TRF for the pairing engine
-	trfData, err := s.generateTRFForPairing(ctx, tournament, roundNumber)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate TRF: %w", err)
-	}
+	// First determine which engine will be used so we can get the correct TRF generator
+	var eng engine.PairingEngine
+	var engineErr error
 
 	// Try engine registry first if available
 	if s.engineRegistry != nil {
-		// Get engine based on configuration or use default Swiss engine
-		var eng engine.PairingEngine
-		var engineErr error
-
 		switch tournament.PairingEngine {
 		case EngineMonrad:
 			eng, engineErr = s.engineRegistry.GetEngine("monrad")
@@ -1740,31 +1738,39 @@ func (s *Service) generateSwissPairings(ctx context.Context, tournament *Tournam
 			// Use the best available Swiss engine
 			eng, engineErr = s.engineRegistry.GetSwissEngine()
 		}
+	}
 
-		if engineErr == nil && eng != nil {
-			// Create pairing request
-			pairingReq := &engine.PairingRequest{
-				TRFData:       trfData,
-				RoundNumber:   roundNumber,
-				PairingSystem: string(tournament.PairingSystem),
-			}
-
-			return eng.GeneratePairings(ctx, pairingReq)
+	// Fall back to legacy single engine if registry failed
+	if eng == nil || engineErr != nil {
+		if s.pairingEngine == nil {
+			return nil, fmt.Errorf("no pairing engine available")
 		}
+		eng = s.pairingEngine
 	}
 
-	// Fall back to legacy single engine
-	if s.pairingEngine == nil {
-		return nil, fmt.Errorf("no pairing engine available")
+	// Get engine-specific TRF generator if available, otherwise use default
+	var generator trf.TRFGenerator
+	if trfAware, ok := eng.(engine.TRFAwarePairingEngine); ok {
+		generator = trfAware.GetTRFGenerator()
+	} else {
+		// Fall back to default generator for engines that don't implement TRFAwarePairingEngine
+		generator = trf.NewGenerator()
 	}
 
+	// Generate TRF with the engine-specific generator
+	trfData, err := s.generateTRFForPairing(ctx, tournament, roundNumber, generator)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate TRF: %w", err)
+	}
+
+	// Create pairing request
 	pairingReq := &engine.PairingRequest{
 		TRFData:       trfData,
 		RoundNumber:   roundNumber,
 		PairingSystem: string(tournament.PairingSystem),
 	}
 
-	return s.pairingEngine.GeneratePairings(ctx, pairingReq)
+	return eng.GeneratePairings(ctx, pairingReq)
 }
 
 // LockRatings locks the ratings for a tournament by refreshing all participant ratings
