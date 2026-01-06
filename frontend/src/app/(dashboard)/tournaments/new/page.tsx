@@ -49,7 +49,7 @@ import { toast } from 'sonner';
 const formSchema = z.object({
   name: z.string().min(3, 'Name muss mindestens 3 Zeichen haben'),
   description: z.string().optional(),
-  type: z.enum(['swiss', 'round_robin', 'knockout', 'team_swiss']),
+  type: z.enum(['swiss', 'round_robin', 'knockout', 'team_swiss', 'wam']),
   mode: z.enum(['otb', 'online', 'hybrid']),
   rounds: z.coerce.number().min(1).max(20),
   timeControl: z.string().min(1, 'Bedenkzeit ist erforderlich'),
@@ -64,7 +64,13 @@ const formSchema = z.object({
   fideRated: z.boolean().default(false),
   dwzRated: z.boolean().default(false),
   pairingSystem: z.enum(['dutch', 'burstein', 'dubov']).default('dutch'),
+  pairingEngine: z.enum(['javafo', 'bbp', 'wam']).optional(),
   tiebreaks: z.array(z.string()).default(['buchholz_cut1', 'buchholz', 'sonneborn_berger']),
+  // WAM-specific settings
+  wamGroupSize: z.coerce.number().min(3).max(10).optional(),
+  wamAssignmentMethod: z.enum(['sequential', 'serpentine', 'random']).optional(),
+  wamEnablePlayoffs: z.boolean().optional(),
+  wamPlayoffsTopN: z.coerce.number().min(1).max(4).optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -235,6 +241,7 @@ export default function NewTournamentPage() {
                               <SelectItem value="round_robin">Rundenturnier</SelectItem>
                               <SelectItem value="knockout">K.O.-System</SelectItem>
                               <SelectItem value="team_swiss">Mannschaftsturnier</SelectItem>
+                              <SelectItem value="wam">WAM (Gruppen + Playoffs)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -490,31 +497,158 @@ export default function NewTournamentPage() {
 
               {step === 2 && (
                 <>
-                  <FormField
-                    control={form.control}
-                    name="pairingSystem"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Paarungssystem</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="System wählen" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="dutch">Dutch (FIDE Standard)</SelectItem>
-                            <SelectItem value="burstein">Burstein</SelectItem>
-                            <SelectItem value="dubov">Dubov</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormDescription>
-                          Dutch ist das offizielle FIDE-Paarungssystem
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  {/* Show pairing system only for Swiss tournaments */}
+                  {form.watch('type') === 'swiss' && (
+                    <>
+                      <FormField
+                        control={form.control}
+                        name="pairingSystem"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Paarungssystem</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="System wählen" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="dutch">Dutch (FIDE Standard)</SelectItem>
+                                <SelectItem value="burstein">Burstein</SelectItem>
+                                <SelectItem value="dubov">Dubov</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormDescription>
+                              Dutch ist das offizielle FIDE-Paarungssystem
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="pairingEngine"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Paarungs-Engine</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value || 'javafo'}>
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Engine wählen" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="javafo">JaVaFo (FIDE-endorsed)</SelectItem>
+                                <SelectItem value="bbp">bbpPairings</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormDescription>
+                              JaVaFo ist die offizielle FIDE-empfohlene Engine
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </>
+                  )}
+
+                  {/* WAM-specific settings */}
+                  {form.watch('type') === 'wam' && (
+                    <div className="space-y-4 rounded-lg border p-4 bg-muted/50">
+                      <h4 className="font-medium">WAM-Einstellungen</h4>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <FormField
+                          control={form.control}
+                          name="wamGroupSize"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Gruppengröße</FormLabel>
+                              <Select onValueChange={(v) => field.onChange(parseInt(v))} value={field.value?.toString() || '6'}>
+                                <FormControl>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Größe wählen" />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  <SelectItem value="4">4 Spieler</SelectItem>
+                                  <SelectItem value="5">5 Spieler</SelectItem>
+                                  <SelectItem value="6">6 Spieler</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name="wamAssignmentMethod"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Gruppeneinteilung</FormLabel>
+                              <Select onValueChange={field.onChange} value={field.value || 'serpentine'}>
+                                <FormControl>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Methode wählen" />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  <SelectItem value="sequential">Sequentiell</SelectItem>
+                                  <SelectItem value="serpentine">Serpentine (empfohlen)</SelectItem>
+                                  <SelectItem value="random">Zufällig</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+
+                      <FormField
+                        control={form.control}
+                        name="wamEnablePlayoffs"
+                        render={({ field }) => (
+                          <FormItem className="flex items-center space-x-2">
+                            <FormControl>
+                              <Checkbox
+                                checked={field.value}
+                                onCheckedChange={field.onChange}
+                              />
+                            </FormControl>
+                            <FormLabel className="!mt-0 font-normal">
+                              Playoffs aktivieren (Gruppensieger spielen K.O.-Runde)
+                            </FormLabel>
+                          </FormItem>
+                        )}
+                      />
+
+                      {form.watch('wamEnablePlayoffs') && (
+                        <FormField
+                          control={form.control}
+                          name="wamPlayoffsTopN"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Playoff-Teilnehmer pro Gruppe</FormLabel>
+                              <Select onValueChange={(v) => field.onChange(parseInt(v))} value={field.value?.toString() || '1'}>
+                                <FormControl>
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  <SelectItem value="1">Top 1</SelectItem>
+                                  <SelectItem value="2">Top 2</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      )}
+                    </div>
+                  )}
 
                   <div className="space-y-4">
                     <FormLabel>Wertung</FormLabel>

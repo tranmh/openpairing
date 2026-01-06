@@ -99,11 +99,11 @@ docker-logs:
 # Database migrations
 migrate-up:
 	@echo "Running migrations..."
-	migrate -path $(BACKEND_DIR)/migrations -database "postgres://openpairing:openpairing@localhost:5432/openpairing?sslmode=disable" up
+	migrate -path $(BACKEND_DIR)/migrations -database "postgres://openpairing:openpairing_dev@localhost:5432/openpairing?sslmode=disable" up
 
 migrate-down:
 	@echo "Rolling back migrations..."
-	migrate -path $(BACKEND_DIR)/migrations -database "postgres://openpairing:openpairing@localhost:5432/openpairing?sslmode=disable" down 1
+	migrate -path $(BACKEND_DIR)/migrations -database "postgres://openpairing:openpairing_dev@localhost:5432/openpairing?sslmode=disable" down 1
 
 migrate-create:
 	@read -p "Enter migration name: " name; \

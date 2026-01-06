@@ -41,6 +41,7 @@ import {
   CheckCircle,
   CircleDot,
   FileText,
+  Shield,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
@@ -283,6 +284,12 @@ export default function TournamentDetailPage() {
               </AlertDialogContent>
             </AlertDialog>
           )}
+          <Link href={`/arbiter/${tournamentId}`}>
+            <Button variant="default">
+              <Shield className="mr-2 h-4 w-4" />
+              Arbiter-Konsole
+            </Button>
+          </Link>
           <Link href={`/tournaments/${tournamentId}/settings`}>
             <Button variant="outline">
               <Settings className="mr-2 h-4 w-4" />
