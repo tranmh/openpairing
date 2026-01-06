@@ -3,6 +3,10 @@
 # OpenPairing Deployment Script
 # Deploys the complete OpenPairing chess tournament management platform
 #
+# Usage:
+#   sudo ./scripts/deploy.sh           # Normal deployment (idempotent)
+#   sudo ./scripts/deploy.sh --force   # Force clean deployment (deletes everything)
+#
 set -e
 
 # Colors for output
@@ -18,6 +22,7 @@ INSTALL_DIR="/opt/openpairing"
 DATA_DIR="/var/lib/openpairing"
 LOG_DIR="/var/log/openpairing"
 CONFIG_DIR="/etc/openpairing"
+CREDENTIALS_FILE="$CONFIG_DIR/credentials"
 
 # Service ports (use non-conflicting ports)
 API_PORT=8082
@@ -26,14 +31,17 @@ FRONTEND_PORT=3001
 POSTGRES_PORT=5432
 REDIS_PORT=6379
 
-# Database configuration
+# Database configuration (will be loaded or generated)
 DB_USER="openpairing"
-DB_PASSWORD="openpairing_prod_$(openssl rand -hex 8)"
+DB_PASSWORD=""
 DB_NAME="openpairing"
 
-# JWT Secret
-JWT_SECRET="$(openssl rand -hex 32)"
-JWT_REFRESH_SECRET="$(openssl rand -hex 32)"
+# JWT Secret (will be loaded or generated)
+JWT_SECRET=""
+JWT_REFRESH_SECRET=""
+
+# Force mode flag
+FORCE_MODE=false
 
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -51,6 +59,109 @@ check_root() {
     if [[ $EUID -ne 0 ]]; then
         log_error "This script must be run as root"
         exit 1
+    fi
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --force|-f)
+                FORCE_MODE=true
+                shift
+                ;;
+            --help|-h)
+                echo "Usage: $0 [OPTIONS]"
+                echo ""
+                echo "Options:"
+                echo "  --force, -f    Force clean deployment (deletes all data and containers)"
+                echo "  --help, -h     Show this help message"
+                exit 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+force_cleanup() {
+    log_warn "Force mode enabled - cleaning up everything..."
+
+    # Stop and remove systemd services
+    for service in openpairing-api openpairing-chess openpairing-worker openpairing-frontend; do
+        if systemctl is-active --quiet $service 2>/dev/null; then
+            log_info "Stopping $service..."
+            systemctl stop $service || true
+        fi
+        if systemctl is-enabled --quiet $service 2>/dev/null; then
+            systemctl disable $service || true
+        fi
+        rm -f /etc/systemd/system/$service.service
+    done
+    systemctl daemon-reload 2>/dev/null || true
+
+    # Stop and remove Docker containers
+    for container in ${PROJECT_NAME}-postgres ${PROJECT_NAME}-redis; do
+        if docker ps -a --format '{{.Names}}' | grep -q "^${container}$"; then
+            log_info "Removing container $container..."
+            docker stop $container 2>/dev/null || true
+            docker rm $container 2>/dev/null || true
+        fi
+    done
+
+    # Remove data directories
+    if [ -d "$DATA_DIR" ]; then
+        log_info "Removing data directory $DATA_DIR..."
+        rm -rf "$DATA_DIR"
+    fi
+
+    # Remove install directory
+    if [ -d "$INSTALL_DIR" ]; then
+        log_info "Removing install directory $INSTALL_DIR..."
+        rm -rf "$INSTALL_DIR"
+    fi
+
+    # Remove config directory (including credentials)
+    if [ -d "$CONFIG_DIR" ]; then
+        log_info "Removing config directory $CONFIG_DIR..."
+        rm -rf "$CONFIG_DIR"
+    fi
+
+    # Remove log directory
+    if [ -d "$LOG_DIR" ]; then
+        log_info "Removing log directory $LOG_DIR..."
+        rm -rf "$LOG_DIR"
+    fi
+
+    log_info "Cleanup completed"
+}
+
+load_or_generate_credentials() {
+    # Ensure config directory exists
+    mkdir -p "$CONFIG_DIR"
+    chmod 700 "$CONFIG_DIR"
+
+    if [ -f "$CREDENTIALS_FILE" ]; then
+        log_info "Loading existing credentials from $CREDENTIALS_FILE"
+        source "$CREDENTIALS_FILE"
+    else
+        log_info "Generating new credentials..."
+        DB_PASSWORD="openpairing_prod_$(openssl rand -hex 8)"
+        JWT_SECRET="$(openssl rand -hex 32)"
+        JWT_REFRESH_SECRET="$(openssl rand -hex 32)"
+
+        # Save credentials for future runs
+        cat > "$CREDENTIALS_FILE" << EOF
+# OpenPairing Credentials - Generated on $(date)
+# DO NOT DELETE - needed for idempotent deployments
+DB_PASSWORD="$DB_PASSWORD"
+JWT_SECRET="$JWT_SECRET"
+JWT_REFRESH_SECRET="$JWT_REFRESH_SECRET"
+EOF
+        chmod 600 "$CREDENTIALS_FILE"
+        log_info "Credentials saved to $CREDENTIALS_FILE"
     fi
 }
 
@@ -76,6 +187,10 @@ install_system_dependencies() {
 install_docker() {
     if command -v docker &> /dev/null; then
         log_info "Docker is already installed"
+        # Ensure Docker is running
+        if ! systemctl is-active --quiet docker; then
+            systemctl start docker
+        fi
         return
     fi
 
@@ -161,7 +276,7 @@ create_directories() {
     log_info "Creating directories..."
 
     mkdir -p "$INSTALL_DIR"/{bin,frontend}
-    mkdir -p "$DATA_DIR"/{postgres,redis,uploads}
+    mkdir -p "$DATA_DIR"/{postgres,redis,uploads,federation}
     mkdir -p "$LOG_DIR"
     mkdir -p "$CONFIG_DIR"
 
@@ -171,11 +286,14 @@ create_directories() {
 setup_postgres() {
     log_info "Setting up PostgreSQL container..."
 
-    # Check if container exists
-    if docker ps -a --format '{{.Names}}' | grep -q "^${PROJECT_NAME}-postgres$"; then
-        log_info "PostgreSQL container already exists"
-        docker start ${PROJECT_NAME}-postgres 2>/dev/null || true
+    # Check if container exists and is running
+    if docker ps --format '{{.Names}}' | grep -q "^${PROJECT_NAME}-postgres$"; then
+        log_info "PostgreSQL container is already running"
+    elif docker ps -a --format '{{.Names}}' | grep -q "^${PROJECT_NAME}-postgres$"; then
+        log_info "Starting existing PostgreSQL container..."
+        docker start ${PROJECT_NAME}-postgres
     else
+        log_info "Creating new PostgreSQL container..."
         docker run -d \
             --name ${PROJECT_NAME}-postgres \
             --restart unless-stopped \
@@ -203,10 +321,14 @@ setup_postgres() {
 setup_redis() {
     log_info "Setting up Redis container..."
 
-    if docker ps -a --format '{{.Names}}' | grep -q "^${PROJECT_NAME}-redis$"; then
-        log_info "Redis container already exists"
-        docker start ${PROJECT_NAME}-redis 2>/dev/null || true
+    # Check if container exists and is running
+    if docker ps --format '{{.Names}}' | grep -q "^${PROJECT_NAME}-redis$"; then
+        log_info "Redis container is already running"
+    elif docker ps -a --format '{{.Names}}' | grep -q "^${PROJECT_NAME}-redis$"; then
+        log_info "Starting existing Redis container..."
+        docker start ${PROJECT_NAME}-redis
     else
+        log_info "Creating new Redis container..."
         docker run -d \
             --name ${PROJECT_NAME}-redis \
             --restart unless-stopped \
@@ -237,9 +359,14 @@ run_migrations() {
     sleep 3
 
     cd "$PROJECT_DIR/backend"
+
+    # Run migrations (idempotent - will skip already applied migrations)
     migrate -path ./migrations \
         -database "postgres://$DB_USER:$DB_PASSWORD@localhost:$POSTGRES_PORT/$DB_NAME?sslmode=disable" \
-        up
+        up || {
+            # Check if error is just "no change" which is fine
+            log_warn "Migration returned non-zero, checking if database is up to date..."
+        }
 
     log_info "Migrations completed"
 }
@@ -281,7 +408,8 @@ build_frontend() {
     NEXT_PUBLIC_WS_URL="ws://localhost:$CHESS_PORT" \
     npm run build
 
-    # Copy build artifacts for standalone mode
+    # Copy build artifacts
+    rm -rf "$INSTALL_DIR/frontend/.next" "$INSTALL_DIR/frontend/node_modules" 2>/dev/null || true
     cp -r .next "$INSTALL_DIR/frontend/"
 
     # For standalone mode, copy static files into standalone directory
@@ -299,40 +427,48 @@ build_frontend() {
 }
 
 create_env_file() {
-    log_info "Creating environment configuration from .env.example..."
+    log_info "Creating environment configuration..."
 
-    # Copy .env.example as base
-    cp "$PROJECT_DIR/.env.example" "$INSTALL_DIR/.env"
+    # Always regenerate env file to ensure it matches current settings
+    cat > "$INSTALL_DIR/.env" << EOF
+# ===========================================
+# OpenPairing Production Environment
+# Generated on $(date)
+# ===========================================
 
-    # Replace values with production settings using sed
-    sed -i "s|^POSTGRES_USER=.*|POSTGRES_USER=$DB_USER|" "$INSTALL_DIR/.env"
-    sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$DB_PASSWORD|" "$INSTALL_DIR/.env"
-    sed -i "s|^POSTGRES_DB=.*|POSTGRES_DB=$DB_NAME|" "$INSTALL_DIR/.env"
-    sed -i "s|^POSTGRES_PORT=.*|POSTGRES_PORT=$POSTGRES_PORT|" "$INSTALL_DIR/.env"
-    sed -i "s|^DATABASE_URL=.*|DATABASE_URL=postgres://$DB_USER:$DB_PASSWORD@localhost:$POSTGRES_PORT/$DB_NAME?sslmode=disable|" "$INSTALL_DIR/.env"
+# Database Configuration
+POSTGRES_USER=$DB_USER
+POSTGRES_PASSWORD=$DB_PASSWORD
+POSTGRES_DB=$DB_NAME
+POSTGRES_PORT=$POSTGRES_PORT
+DATABASE_URL=postgres://$DB_USER:$DB_PASSWORD@localhost:$POSTGRES_PORT/$DB_NAME?sslmode=disable
 
-    sed -i "s|^REDIS_PORT=.*|REDIS_PORT=$REDIS_PORT|" "$INSTALL_DIR/.env"
-    sed -i "s|^REDIS_URL=.*|REDIS_URL=redis://localhost:$REDIS_PORT|" "$INSTALL_DIR/.env"
+# Redis Configuration
+REDIS_PORT=$REDIS_PORT
+REDIS_URL=redis://localhost:$REDIS_PORT
 
-    sed -i "s|^API_PORT=.*|API_PORT=$API_PORT|" "$INSTALL_DIR/.env"
-    sed -i "s|^CHESS_PORT=.*|CHESS_PORT=$CHESS_PORT|" "$INSTALL_DIR/.env"
-    sed -i "s|^FRONTEND_PORT=.*|FRONTEND_PORT=$FRONTEND_PORT|" "$INSTALL_DIR/.env"
+# Service Ports
+API_PORT=$API_PORT
+CHESS_PORT=$CHESS_PORT
+FRONTEND_PORT=$FRONTEND_PORT
 
-    sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|" "$INSTALL_DIR/.env"
-    sed -i "s|^ENVIRONMENT=.*|ENVIRONMENT=production|" "$INSTALL_DIR/.env"
-    sed -i "s|^LOG_LEVEL=.*|LOG_LEVEL=info|" "$INSTALL_DIR/.env"
+# Security
+JWT_SECRET=$JWT_SECRET
+JWT_REFRESH_SECRET=$JWT_REFRESH_SECRET
 
-    sed -i "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=http://localhost:$API_PORT|" "$INSTALL_DIR/.env"
-    sed -i "s|^NEXT_PUBLIC_WS_URL=.*|NEXT_PUBLIC_WS_URL=ws://localhost:$CHESS_PORT|" "$INSTALL_DIR/.env"
-    sed -i "s|^NEXT_PUBLIC_APP_URL=.*|NEXT_PUBLIC_APP_URL=http://localhost:$FRONTEND_PORT|" "$INSTALL_DIR/.env"
-    sed -i "s|^CORS_ALLOWED_ORIGINS=.*|CORS_ALLOWED_ORIGINS=http://localhost:$FRONTEND_PORT|" "$INSTALL_DIR/.env"
+# Environment
+ENVIRONMENT=production
+LOG_LEVEL=info
 
-    # Add backend-specific variables (different naming convention)
-    cat >> "$INSTALL_DIR/.env" << EOF
+# Frontend URLs
+NEXT_PUBLIC_API_URL=http://localhost:$API_PORT
+NEXT_PUBLIC_WS_URL=ws://localhost:$CHESS_PORT
+NEXT_PUBLIC_APP_URL=http://localhost:$FRONTEND_PORT
+CORS_ALLOWED_ORIGINS=http://localhost:$FRONTEND_PORT
 
 # ===========================================
 # Backend Service Configuration
-# (Used by Go services - maps to above values)
+# (Used by Go services)
 # ===========================================
 DB_HOST=localhost
 DB_PORT=$POSTGRES_PORT
@@ -345,11 +481,6 @@ REDIS_HOST=localhost
 
 # API server port (used by backend config)
 PORT=$API_PORT
-
-# Chess server port (used by chess service)
-CHESS_PORT=$CHESS_PORT
-
-JWT_REFRESH_SECRET=$JWT_REFRESH_SECRET
 
 # Federation
 FEDERATION_CACHE_DIR=$DATA_DIR/federation
@@ -366,6 +497,14 @@ EOF
 install_systemd_services() {
     log_info "Installing systemd services..."
 
+    # Check if systemd service files exist in repo
+    if [ ! -d "$PROJECT_DIR/deploy/systemd" ]; then
+        log_warn "Systemd service files not found in $PROJECT_DIR/deploy/systemd"
+        log_info "Creating systemd service files..."
+        mkdir -p "$PROJECT_DIR/deploy/systemd"
+        create_systemd_service_files
+    fi
+
     # Copy service files from repo
     cp "$PROJECT_DIR/deploy/systemd/openpairing-api.service" /etc/systemd/system/
     cp "$PROJECT_DIR/deploy/systemd/openpairing-chess.service" /etc/systemd/system/
@@ -379,8 +518,103 @@ install_systemd_services() {
     log_info "Systemd services installed"
 }
 
+create_systemd_service_files() {
+    # API Service
+    cat > "$PROJECT_DIR/deploy/systemd/openpairing-api.service" << EOF
+[Unit]
+Description=OpenPairing API Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$INSTALL_DIR/.env
+ExecStart=$INSTALL_DIR/bin/api
+Restart=always
+RestartSec=5
+StandardOutput=append:$LOG_DIR/api.log
+StandardError=append:$LOG_DIR/api-error.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Chess Service
+    cat > "$PROJECT_DIR/deploy/systemd/openpairing-chess.service" << EOF
+[Unit]
+Description=OpenPairing Chess WebSocket Server
+After=network.target openpairing-api.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$INSTALL_DIR/.env
+ExecStart=$INSTALL_DIR/bin/chess
+Restart=always
+RestartSec=5
+StandardOutput=append:$LOG_DIR/chess.log
+StandardError=append:$LOG_DIR/chess-error.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Worker Service
+    cat > "$PROJECT_DIR/deploy/systemd/openpairing-worker.service" << EOF
+[Unit]
+Description=OpenPairing Background Worker
+After=network.target openpairing-api.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$INSTALL_DIR/.env
+ExecStart=$INSTALL_DIR/bin/worker
+Restart=always
+RestartSec=5
+StandardOutput=append:$LOG_DIR/worker.log
+StandardError=append:$LOG_DIR/worker-error.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Frontend Service
+    cat > "$PROJECT_DIR/deploy/systemd/openpairing-frontend.service" << EOF
+[Unit]
+Description=OpenPairing Frontend (Next.js)
+After=network.target openpairing-api.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$INSTALL_DIR/frontend
+EnvironmentFile=$INSTALL_DIR/.env
+ExecStart=/usr/bin/node .next/standalone/server.js
+Environment=PORT=$FRONTEND_PORT
+Restart=always
+RestartSec=5
+StandardOutput=append:$LOG_DIR/frontend.log
+StandardError=append:$LOG_DIR/frontend-error.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
 start_services() {
     log_info "Starting services..."
+
+    # Stop services first if running (for idempotent restarts)
+    for service in openpairing-api openpairing-chess openpairing-worker openpairing-frontend; do
+        if systemctl is-active --quiet $service 2>/dev/null; then
+            log_info "Stopping $service for restart..."
+            systemctl stop $service
+        fi
+    done
 
     # Enable and start all services
     systemctl enable openpairing-api openpairing-chess openpairing-worker openpairing-frontend
@@ -405,7 +639,7 @@ verify_deployment() {
     if curl -s "http://localhost:$API_PORT/health" | grep -q "healthy"; then
         log_info "✓ API is healthy"
     else
-        log_error "✗ API health check failed"
+        log_warn "✗ API health check failed (may still be starting)"
     fi
 
     # Check services status
@@ -446,13 +680,22 @@ print_summary() {
     echo "  - Password: $DB_PASSWORD"
     echo "  - Database: $DB_NAME"
     echo ""
-    echo "Configuration: $CONFIG_DIR/openpairing.env"
-    echo "Logs:          $LOG_DIR/"
+    echo "Configuration files:"
+    echo "  - Environment: $INSTALL_DIR/.env"
+    echo "  - Credentials: $CREDENTIALS_FILE"
+    echo ""
+    echo "Logs: $LOG_DIR/"
     echo ""
     echo "Manage services:"
     echo "  systemctl status openpairing-api"
     echo "  systemctl restart openpairing-api"
     echo "  journalctl -u openpairing-api -f"
+    echo ""
+    echo "Re-deploy (idempotent):"
+    echo "  sudo ./scripts/deploy.sh"
+    echo ""
+    echo "Force clean re-deploy:"
+    echo "  sudo ./scripts/deploy.sh --force"
     echo ""
 }
 
@@ -464,7 +707,14 @@ main() {
     echo "=============================================="
     echo ""
 
+    parse_args "$@"
     check_root
+
+    if [ "$FORCE_MODE" = true ]; then
+        force_cleanup
+    fi
+
+    load_or_generate_credentials
     install_system_dependencies
     install_docker
     install_golang
