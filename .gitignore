@@ -2,6 +2,7 @@
 .env
 .env.local
 .env.*.local
+!.env.example
 
 # IDE
 .idea/
@@ -9,40 +10,167 @@
 *.swp
 *.swo
 *.sublime-*
+*.iml
 
 # OS
 .DS_Store
+.DS_Store?
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
 # Logs
 *.log
 logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
+# =========================
+# Go / Backend
+# =========================
+
+# Build output - compiled binaries
+bin/
+backend/bin/
+
+# Go module files (if vendoring)
+backend/vendor/
+
+# Go build cache (rarely in repo, but just in case)
+__debug_bin*
+
+# Go test binary
+*.test
+
+# Go coverage files
+*.out
+coverage.out
+coverage.html
+
+# =========================
+# Node / Frontend
+# =========================
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Vercel
+.vercel
+
+# PWA generated files
+public/sw.js
+public/workbox-*.js
+
+# =========================
+# Testing
+# =========================
+
+# Coverage reports
+coverage/
+*.lcov
+.nyc_output/
+
+# Playwright
+playwright-report/
+playwright/.cache/
+test-results/
+frontend/playwright-report/
+frontend/test-results/
+
+# Jest
+jest-results/
+
+# =========================
+# Docker
+# =========================
+
+.docker/
+docker-compose.override.yml
+
+# =========================
+# Database / Storage
+# =========================
+
+# Local database files (if any)
+*.db
+*.sqlite
+*.sqlite3
+
+# MinIO data (local dev)
+minio-data/
+data/
+
+# =========================
 # Build artifacts
+# =========================
+
 *.exe
+*.exe~
 *.dll
 *.so
 *.dylib
 
-# Test files
-*.test
-coverage/
-
-# Go
-backend/vendor/
-
-# Node
-node_modules/
-.next/
-
-# Docker
-.docker/
-
-# JaVaFo and bbpPairings binaries (download separately)
-backend/bin/*.jar
-backend/bin/bbpPairings
-
+# =========================
 # Temporary files
+# =========================
+
 tmp/
 temp/
 *.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# =========================
+# Secrets and credentials
+# =========================
+
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# =========================
+# Misc
+# =========================
+
+# Dependency directories
+jspm_packages/
+
+# Optional npm cache
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# turbo
+.turbo
+
+# Debug
+*.pid
+*.seed
+*.pid.lock
