@@ -115,8 +115,8 @@ func (h *Handler) GetAuditLog(c *gin.Context) {
 		return
 	}
 
-	userID, _ := c.Get("user_id")
-	arbiterID, _ := userID.(uuid.UUID)
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
 
 	limit := 100
 	if l := c.Query("limit"); l != "" {
@@ -157,8 +157,8 @@ func (h *Handler) WithdrawPlayer(c *gin.Context) {
 	}
 	req.TournamentID = id
 
-	userID, _ := c.Get("user_id")
-	arbiterID, _ := userID.(uuid.UUID)
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
 
 	if err := h.service.WithdrawPlayer(c.Request.Context(), &req, arbiterID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -191,8 +191,8 @@ func (h *Handler) ReactivatePlayer(c *gin.Context) {
 	}
 	req.TournamentID = id
 
-	userID, _ := c.Get("user_id")
-	arbiterID, _ := userID.(uuid.UUID)
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
 
 	if err := h.service.ReactivatePlayer(c.Request.Context(), &req, arbiterID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -225,8 +225,8 @@ func (h *Handler) AssignBye(c *gin.Context) {
 	}
 	req.TournamentID = id
 
-	userID, _ := c.Get("user_id")
-	arbiterID, _ := userID.(uuid.UUID)
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
 
 	if err := h.service.AssignBye(c.Request.Context(), &req, arbiterID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -259,8 +259,8 @@ func (h *Handler) CorrectResult(c *gin.Context) {
 	}
 	req.TournamentID = id
 
-	userID, _ := c.Get("user_id")
-	arbiterID, _ := userID.(uuid.UUID)
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
 
 	if err := h.service.CorrectResult(c.Request.Context(), &req, arbiterID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -293,8 +293,8 @@ func (h *Handler) SwapPairing(c *gin.Context) {
 	}
 	req.TournamentID = id
 
-	userID, _ := c.Get("user_id")
-	arbiterID, _ := userID.(uuid.UUID)
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
 
 	if err := h.service.SwapPairing(c.Request.Context(), &req, arbiterID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -327,8 +327,8 @@ func (h *Handler) ChangeColor(c *gin.Context) {
 	}
 	req.TournamentID = id
 
-	userID, _ := c.Get("user_id")
-	arbiterID, _ := userID.(uuid.UUID)
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
 
 	if err := h.service.ChangeColor(c.Request.Context(), &req, arbiterID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -369,8 +369,8 @@ func (h *Handler) DeletePairing(c *gin.Context) {
 	req.TournamentID = tournamentID
 	req.GameID = gameID
 
-	userID, _ := c.Get("user_id")
-	arbiterID, _ := userID.(uuid.UUID)
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
 
 	if err := h.service.DeletePairing(c.Request.Context(), &req, arbiterID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -403,8 +403,8 @@ func (h *Handler) CreateManualPairing(c *gin.Context) {
 	}
 	req.TournamentID = tournamentID
 
-	userID, _ := c.Get("user_id")
-	arbiterID, _ := userID.(uuid.UUID)
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
 
 	response, err := h.service.CreateManualPairing(c.Request.Context(), &req, arbiterID)
 	if err != nil {
@@ -438,8 +438,8 @@ func (h *Handler) CreateAnnouncement(c *gin.Context) {
 	}
 	req.TournamentID = id
 
-	userID, _ := c.Get("user_id")
-	arbiterID, _ := userID.(uuid.UUID)
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
 
 	announcement, err := h.service.CreateAnnouncement(c.Request.Context(), &req, arbiterID)
 	if err != nil {
