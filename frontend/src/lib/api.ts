@@ -388,8 +388,8 @@ export const tournamentsApi = {
   getStandings: (id: string) =>
     api.get<{ standings: TournamentParticipant[] }>(`/tournaments/${id}/standings`),
 
-  enterResult: (tournamentId: string, gameId: string, result: string) =>
-    api.put<Game>(`/tournaments/${tournamentId}/games/${gameId}/result`, { result }),
+  enterResult: (_tournamentId: string, gameId: string, result: string) =>
+    api.post<{ game: Game }>(`/results`, { gameId, result }),
 
   // Round Robin Seating Chart
   getSeatingChart: (id: string, round?: number) =>

@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/store/auth';
 import type { TournamentStatus } from '@/types/arbiter';
 
 /**
@@ -24,6 +25,11 @@ interface ArbiterStatusResponse {
 }
 
 export function useArbiterStatus(tournamentId: string) {
+  const { isHydrated, isAuthenticated } = useAuthStore();
+
+  // Wait for auth hydration before making authenticated API calls
+  const canFetch = isHydrated && isAuthenticated;
+
   const query = useQuery<TournamentStatus>({
     queryKey: arbiterStatusKey(tournamentId),
     queryFn: async (): Promise<TournamentStatus> => {
@@ -36,7 +42,8 @@ export function useArbiterStatus(tournamentId: string) {
       // API returns { status: TournamentStatus }, extract the status object
       return response.data?.status as TournamentStatus;
     },
-    refetchInterval: 30000, // Refresh every 30 seconds
+    enabled: canFetch,
+    refetchInterval: canFetch ? 30000 : false, // Refresh every 30 seconds only when authenticated
     staleTime: 10000, // Consider data stale after 10 seconds
   });
 
@@ -56,6 +63,9 @@ export const pairingsKey = (tournamentId: string, round: string | number) =>
   ['pairings', tournamentId, String(round)] as const;
 
 export function usePairings(tournamentId: string, roundNumber: number | string) {
+  const { isHydrated, isAuthenticated } = useAuthStore();
+  const canFetch = isHydrated && isAuthenticated;
+
   return useQuery({
     queryKey: pairingsKey(tournamentId, roundNumber),
     queryFn: async () => {
@@ -67,6 +77,6 @@ export function usePairings(tournamentId: string, roundNumber: number | string) 
       }
       return response.data;
     },
-    enabled: !!roundNumber,
+    enabled: canFetch && !!roundNumber,
   });
 }

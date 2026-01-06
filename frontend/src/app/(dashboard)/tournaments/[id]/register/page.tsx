@@ -18,6 +18,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, Search, UserPlus, Loader2, Check } from 'lucide-react';
 import { api, federationApi, type FederationPlayer } from '@/lib/api';
+import { useAuthStore } from '@/store/auth';
 import { toast } from 'sonner';
 
 interface Tournament {
@@ -39,12 +40,16 @@ export default function RegisterPlayerPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const tournamentId = params.id as string;
+  const { isHydrated, isAuthenticated } = useAuthStore();
 
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebounce(search, 300);
   const [registering, setRegistering] = useState<string | null>(null);
 
-  // Fetch tournament info
+  // Wait for auth hydration before making authenticated API calls
+  const canFetch = isHydrated && isAuthenticated;
+
+  // Fetch tournament info (public endpoint, doesn't require auth)
   const { data: tournamentData, isLoading: tournamentLoading } = useQuery<{ tournament: Tournament }>({
     queryKey: ['tournament', tournamentId],
     queryFn: async () => {
@@ -53,13 +58,14 @@ export default function RegisterPlayerPage() {
     },
   });
 
-  // Fetch existing participants
+  // Fetch existing participants (requires auth)
   const { data: participantsData } = useQuery<{ participants: Participant[] }>({
     queryKey: ['participants', tournamentId],
     queryFn: async () => {
       const response = await api.get(`/tournaments/${tournamentId}/participants`);
       return response.data as { participants: Participant[] };
     },
+    enabled: canFetch,
   });
 
   // Search federation players
@@ -223,7 +229,7 @@ export default function RegisterPlayerPage() {
                         <Button
                           size="sm"
                           onClick={() => handleRegister(player)}
-                          disabled={isRegistering}
+                          disabled={isRegistering || !canFetch}
                         >
                           {isRegistering ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />

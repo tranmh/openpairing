@@ -25,6 +25,15 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Calendar,
@@ -38,10 +47,12 @@ import {
   Printer,
   Share2,
   Edit,
+  Edit2,
   CheckCircle,
   CircleDot,
   FileText,
   Shield,
+  Loader2,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
@@ -603,8 +614,8 @@ function ParticipantsTab({
                       <td className="py-2 px-2">{p.startRank}</td>
                       <td className="py-2 px-2">{p.playerName || p.playerId}</td>
                       <td className="py-2 px-2 text-right">{p.startingRating}</td>
-                      <td className="py-2 px-2 text-right">{p.points}</td>
-                      <td className="py-2 px-2 text-right">{p.buchholz.toFixed(1)}</td>
+                      <td className="py-2 px-2 text-right">{p.points ?? 0}</td>
+                      <td className="py-2 px-2 text-right">{p.buchholz?.toFixed(1) ?? '-'}</td>
                     </tr>
                   ))}
               </tbody>
@@ -712,6 +723,7 @@ function PairingsTab({
                   <th className="text-left py-2 px-2">Weiß</th>
                   <th className="text-center py-2 px-2">Ergebnis</th>
                   <th className="text-right py-2 px-2">Schwarz</th>
+                  <th className="text-center py-2 px-2 no-print">Aktion</th>
                 </tr>
               </thead>
               <tbody>
@@ -720,10 +732,21 @@ function PairingsTab({
                     <td className="py-2 px-2 text-center">{game.boardNumber}</td>
                     <td className="py-2 px-2">{game.whitePlayerName || game.whiteParticipantId}</td>
                     <td className="py-2 px-2 text-center font-medium">
-                      {game.result || '-'}
+                      {game.result === '1/2-1/2' ? '½-½' : (game.result || '-')}
                     </td>
                     <td className="py-2 px-2 text-right">
                       {game.blackPlayerName || game.blackParticipantId || 'BYE'}
+                    </td>
+                    <td className="py-2 px-2 text-center no-print">
+                      <ResultEntryButton
+                        tournamentId={tournamentId}
+                        gameId={game.id}
+                        boardNumber={game.boardNumber}
+                        whiteName={game.whitePlayerName || game.whiteParticipantId}
+                        blackName={game.blackPlayerName || game.blackParticipantId || 'BYE'}
+                        currentResult={game.result}
+                        selectedRound={selectedRound}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -733,6 +756,117 @@ function PairingsTab({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function ResultEntryButton({
+  tournamentId,
+  gameId,
+  boardNumber,
+  whiteName,
+  blackName,
+  currentResult,
+  selectedRound,
+}: {
+  tournamentId: string;
+  gameId: string;
+  boardNumber: number;
+  whiteName: string;
+  blackName: string;
+  currentResult?: string;
+  selectedRound: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [result, setResult] = useState('');
+  const queryClient = useQueryClient();
+
+  // Reset result when dialog closes
+  useEffect(() => {
+    if (!open) {
+      setResult('');
+    }
+  }, [open]);
+
+  const enterResultMutation = useMutation({
+    mutationFn: async (resultValue: string) => {
+      const response = await api.post('/results', {
+        gameId,
+        result: resultValue,
+      });
+      if (response.error) throw new Error(response.error.message);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pairings', tournamentId, selectedRound] });
+      queryClient.invalidateQueries({ queryKey: ['standings', tournamentId] });
+      toast.success('Ergebnis eingetragen');
+      setOpen(false);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Fehler beim Eintragen des Ergebnisses');
+    },
+  });
+
+  const handleSubmit = () => {
+    if (result) {
+      enterResultMutation.mutate(result);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" aria-label="Ergebnis eintragen">
+          <Edit2 className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Ergebnis eintragen</DialogTitle>
+          <DialogDescription>
+            Brett {boardNumber}: {whiteName} vs {blackName}
+            {currentResult && (
+              <span className="block mt-1">
+                Aktuell: <strong>{currentResult === '1/2-1/2' ? '½-½' : currentResult}</strong>
+              </span>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-3 gap-2 py-4">
+          {['1-0', '1/2-1/2', '0-1'].map((r) => (
+            <Button
+              key={r}
+              variant={result === r ? 'default' : 'outline'}
+              onClick={() => setResult(r)}
+              className="text-lg"
+            >
+              {r === '1/2-1/2' ? '½-½' : r}
+            </Button>
+          ))}
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {['1-0F', '0-0F', '0-1F'].map((r) => (
+            <Button
+              key={r}
+              variant={result === r ? 'secondary' : 'ghost'}
+              onClick={() => setResult(r)}
+              size="sm"
+            >
+              {r} (k)
+            </Button>
+          ))}
+        </div>
+        <DialogFooter className="mt-4">
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Abbrechen
+          </Button>
+          <Button onClick={handleSubmit} disabled={!result || enterResultMutation.isPending}>
+            {enterResultMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Speichern
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -791,13 +925,13 @@ function StandingsTab({ tournamentId }: { tournamentId: string }) {
                     <td className="py-2 px-2 text-center">{i + 1}</td>
                     <td className="py-2 px-2">{p.playerName || p.playerId}</td>
                     <td className="py-2 px-2 text-right">{p.startingRating}</td>
-                    <td className="py-2 px-2 text-right font-medium">{p.points}</td>
-                    <td className="py-2 px-2 text-right">{p.buchholz.toFixed(1)}</td>
+                    <td className="py-2 px-2 text-right font-medium">{p.points ?? 0}</td>
+                    <td className="py-2 px-2 text-right">{p.buchholz?.toFixed(1) ?? '-'}</td>
                     <td className="py-2 px-2 text-right">
-                      {(p as any).buchholzCut1?.toFixed(1) || '-'}
+                      {(p as any).buchholzCut1?.toFixed(1) ?? '-'}
                     </td>
                     <td className="py-2 px-2 text-right">
-                      {(p as any).sonnebornBerger?.toFixed(2) || '-'}
+                      {(p as any).sonnebornBerger?.toFixed(2) ?? '-'}
                     </td>
                   </tr>
                 ))}

@@ -3,6 +3,7 @@ package export
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -23,7 +24,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 func (r *Repository) GetTournamentExportData(ctx context.Context, tournamentID uuid.UUID) (*TournamentExport, error) {
 	// Get tournament details
 	var tournament TournamentExport
-	var endDate *string
+	var endDate *time.Time
 	var site string
 
 	err := r.db.QueryRow(ctx, `
@@ -276,7 +277,7 @@ func (r *Repository) GetGamesExportData(ctx context.Context, tournamentID uuid.U
 		var tID uuid.UUID
 		var roundNum, boardNum int
 		var event, site string
-		var startDate string
+		var startDate time.Time
 		var white, black string
 		var result *string
 		var whiteElo, blackElo *int
@@ -316,7 +317,7 @@ func (r *Repository) GetGamesExportData(ctx context.Context, tournamentID uuid.U
 		g.Header = PGNHeader{
 			Event:       event,
 			Site:        site,
-			Date:        startDate,
+			Date:        startDate.Format("2006.01.02"),
 			Round:       fmt.Sprintf("%d", roundNum),
 			White:       white,
 			Black:       black,

@@ -60,7 +60,8 @@ export function useEnterResult(tournamentId: string) {
 
   return useMutation({
     mutationFn: async ({ gameId, result }: { gameId: string; result: string }) => {
-      const response = await api.put(`/tournaments/${tournamentId}/games/${gameId}/result`, {
+      const response = await api.post(`/results`, {
+        gameId,
         result,
       });
       if (response.error) throw new Error(response.error.message);

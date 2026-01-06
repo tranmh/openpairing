@@ -10,6 +10,7 @@ import { reportsApi } from '@/lib/api';
 import { DWZReportViewer } from '@/components/reports/DWZReportViewer';
 import { TRFReportViewer } from '@/components/reports/TRFReportViewer';
 import { NormReportViewer } from '@/components/reports/NormReportViewer';
+import { useAuthStore } from '@/store/auth';
 
 interface ReportsTabProps {
   tournamentId: string;
@@ -19,6 +20,10 @@ type ReportType = 'dwz' | 'trf' | 'norm';
 
 export function ReportsTab({ tournamentId }: ReportsTabProps) {
   const [activeReport, setActiveReport] = useState<ReportType>('dwz');
+  const { isHydrated, isAuthenticated } = useAuthStore();
+
+  // Wait for auth hydration before making authenticated API calls
+  const canFetch = isHydrated && isAuthenticated;
 
   const { data: dwzData, isLoading: dwzLoading, error: dwzError } = useQuery({
     queryKey: ['report', 'dwz', tournamentId],
@@ -29,7 +34,7 @@ export function ReportsTab({ tournamentId }: ReportsTabProps) {
       }
       return response.data;
     },
-    enabled: activeReport === 'dwz',
+    enabled: canFetch && activeReport === 'dwz',
   });
 
   const { data: trfData, isLoading: trfLoading, error: trfError } = useQuery({
@@ -41,7 +46,7 @@ export function ReportsTab({ tournamentId }: ReportsTabProps) {
       }
       return response.data;
     },
-    enabled: activeReport === 'trf',
+    enabled: canFetch && activeReport === 'trf',
   });
 
   const { data: normData, isLoading: normLoading, error: normError } = useQuery({
@@ -53,7 +58,7 @@ export function ReportsTab({ tournamentId }: ReportsTabProps) {
       }
       return response.data;
     },
-    enabled: activeReport === 'norm',
+    enabled: canFetch && activeReport === 'norm',
   });
 
   const handleDownloadDWZCSV = () => {
@@ -93,7 +98,8 @@ export function ReportsTab({ tournamentId }: ReportsTabProps) {
       </div>
 
       {/* Report Content */}
-      {activeReport === 'dwz' && (
+      {!canFetch && <LoadingSkeleton />}
+      {canFetch && activeReport === 'dwz' && (
         dwzLoading ? (
           <LoadingSkeleton />
         ) : dwzError ? (
@@ -110,7 +116,7 @@ export function ReportsTab({ tournamentId }: ReportsTabProps) {
         )
       )}
 
-      {activeReport === 'trf' && (
+      {canFetch && activeReport === 'trf' && (
         trfLoading ? (
           <LoadingSkeleton />
         ) : trfError ? (
@@ -126,7 +132,7 @@ export function ReportsTab({ tournamentId }: ReportsTabProps) {
         )
       )}
 
-      {activeReport === 'norm' && (
+      {canFetch && activeReport === 'norm' && (
         normLoading ? (
           <LoadingSkeleton />
         ) : normError ? (
