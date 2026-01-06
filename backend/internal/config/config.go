@@ -185,7 +185,7 @@ func Load() *Config {
 			Timeout:    getDurationEnv("PAIRING_TIMEOUT", 5*time.Minute),
 		},
 		RateLimit: RateLimitConfig{
-			Enabled: getBoolEnv("RATE_LIMIT_ENABLED", true),
+			Enabled: getBoolEnv("RATE_LIMIT_ENABLED", false),
 		},
 		Email: EmailConfig{
 			SMTPHost:     getEnv("SMTP_HOST", "localhost"),

@@ -18,17 +18,23 @@ export const arbiterStatusKey = (tournamentId: string) =>
  * - Proper typing for TournamentStatus
  * - Easy refetch capability
  */
+// API response wrapper type
+interface ArbiterStatusResponse {
+  status: TournamentStatus;
+}
+
 export function useArbiterStatus(tournamentId: string) {
   const query = useQuery<TournamentStatus>({
     queryKey: arbiterStatusKey(tournamentId),
     queryFn: async (): Promise<TournamentStatus> => {
-      const response = await api.get<TournamentStatus>(
+      const response = await api.get<ArbiterStatusResponse>(
         `/arbiter/tournaments/${tournamentId}/status`
       );
       if (response.error) {
         throw new Error(response.error.message);
       }
-      return response.data as TournamentStatus;
+      // API returns { status: TournamentStatus }, extract the status object
+      return response.data?.status as TournamentStatus;
     },
     refetchInterval: 30000, // Refresh every 30 seconds
     staleTime: 10000, // Consider data stale after 10 seconds

@@ -101,7 +101,7 @@ export default function ArbiterConsolePage() {
         currentRound={status.currentRound}
         totalRounds={status.tournament.rounds}
         statistics={status.statistics}
-        activeGamesCount={status.activeGames.length}
+        activeGamesCount={status.activeGames?.length ?? 0}
         pendingResults={status.pendingResults}
       />
 
@@ -137,19 +137,19 @@ export default function ArbiterConsolePage() {
         <TabsContent value="games">
           <ActiveGamesTab
             tournamentId={tournamentId}
-            games={status.activeGames}
+            games={status.activeGames ?? []}
             roundStatus={status.currentRound?.status || 'pending'}
           />
         </TabsContent>
 
         <TabsContent value="participants">
-          <ParticipantsTab tournamentId={tournamentId} participants={status.participants} />
+          <ParticipantsTab tournamentId={tournamentId} participants={status.participants ?? []} />
         </TabsContent>
 
         <TabsContent value="rounds">
           <RoundControlTab
             tournamentId={tournamentId}
-            rounds={status.rounds}
+            rounds={status.rounds ?? []}
             currentRound={status.currentRound}
             pendingResults={status.pendingResults}
           />
@@ -158,8 +158,8 @@ export default function ArbiterConsolePage() {
         <TabsContent value="pairings">
           <PairingsManagementTab
             tournamentId={tournamentId}
-            rounds={status.rounds}
-            participants={status.participants}
+            rounds={status.rounds ?? []}
+            participants={status.participants ?? []}
           />
         </TabsContent>
 
@@ -167,7 +167,7 @@ export default function ArbiterConsolePage() {
           <ActionsTab
             tournamentId={tournamentId}
             currentRound={status.currentRound}
-            participants={status.participants}
+            participants={status.participants ?? []}
             tournamentRounds={status.tournament.rounds}
           />
         </TabsContent>
@@ -176,7 +176,7 @@ export default function ArbiterConsolePage() {
           <SettingsTab
             tournamentId={tournamentId}
             tournamentName={status.tournament.name}
-            participants={status.participants}
+            participants={status.participants ?? []}
           />
         </TabsContent>
       </Tabs>
