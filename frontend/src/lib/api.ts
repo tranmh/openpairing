@@ -129,11 +129,26 @@ class ApiClient {
 
       if (!response.ok) {
         const errorData = data as Record<string, unknown>;
+        // Backend returns { error: { message, code } } format
+        const errorObj = errorData.error as { message?: string; code?: string } | string | undefined;
+        let message: string;
+        let code: string | undefined;
+
+        if (typeof errorObj === 'object' && errorObj !== null) {
+          message = errorObj.message || 'An error occurred';
+          code = errorObj.code;
+        } else if (typeof errorObj === 'string') {
+          message = errorObj;
+        } else {
+          message = (errorData.message as string) || 'An error occurred';
+          code = errorData.code as string | undefined;
+        }
+
         return {
           status,
           error: {
-            message: (errorData.error || errorData.message || 'An error occurred') as string,
-            code: errorData.code as string | undefined,
+            message,
+            code,
             details: errorData.details as Record<string, string[]> | undefined,
           },
         };
