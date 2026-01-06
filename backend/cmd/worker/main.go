@@ -7,9 +7,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/openpairing/openpairing/internal/config"
-	"github.com/openpairing/openpairing/internal/database"
-	"github.com/openpairing/openpairing/internal/worker"
+	"github.com/tranmh/openpairing/internal/config"
+	"github.com/tranmh/openpairing/internal/database"
+	"github.com/tranmh/openpairing/internal/worker"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openpairing/openpairing/internal/config"
+	"github.com/tranmh/openpairing/internal/config"
 )
 
 func TestJWTService_GenerateAndValidateAccessToken(t *testing.T) {

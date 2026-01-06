@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/openpairing/openpairing/internal/tournament/tiebreak"
+	"github.com/tranmh/openpairing/internal/tournament/tiebreak"
 )
 
 // Service provides standings functionality

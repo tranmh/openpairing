@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/openpairing/openpairing/internal/config"
+	"github.com/tranmh/openpairing/internal/config"
 	"github.com/rs/zerolog/log"
 )
 

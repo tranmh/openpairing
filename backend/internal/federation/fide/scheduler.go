@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openpairing/openpairing/internal/player"
+	"github.com/tranmh/openpairing/internal/player"
 	"github.com/rs/zerolog"
 )
 

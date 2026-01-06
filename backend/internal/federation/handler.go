@@ -9,13 +9,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
-	"github.com/openpairing/openpairing/internal/federation/dsb"
-	"github.com/openpairing/openpairing/internal/federation/fide"
-	"github.com/openpairing/openpairing/internal/federation/oesb"
-	"github.com/openpairing/openpairing/internal/federation/portal64"
-	"github.com/openpairing/openpairing/internal/federation/ssb"
-	"github.com/openpairing/openpairing/internal/player"
-	"github.com/openpairing/openpairing/pkg/response"
+	"github.com/tranmh/openpairing/internal/federation/dsb"
+	"github.com/tranmh/openpairing/internal/federation/fide"
+	"github.com/tranmh/openpairing/internal/federation/oesb"
+	"github.com/tranmh/openpairing/internal/federation/portal64"
+	"github.com/tranmh/openpairing/internal/federation/ssb"
+	"github.com/tranmh/openpairing/internal/player"
+	"github.com/tranmh/openpairing/pkg/response"
 )
 
 // Handler handles federation-related HTTP requests

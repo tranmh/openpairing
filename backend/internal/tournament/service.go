@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/openpairing/openpairing/internal/pairing/engine"
-	"github.com/openpairing/openpairing/internal/pairing/trf"
-	"github.com/openpairing/openpairing/internal/tournament/tiebreak"
+	"github.com/tranmh/openpairing/internal/pairing/engine"
+	"github.com/tranmh/openpairing/internal/pairing/trf"
+	"github.com/tranmh/openpairing/internal/tournament/tiebreak"
 	"github.com/rs/zerolog"
 )
 

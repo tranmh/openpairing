@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/openpairing/openpairing/pkg/response"
+	"github.com/tranmh/openpairing/pkg/response"
 )
 
 // Middleware provides authentication middleware

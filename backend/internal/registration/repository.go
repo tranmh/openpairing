@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/openpairing/openpairing/internal/tournament"
+	"github.com/tranmh/openpairing/internal/tournament"
 )
 
 var (

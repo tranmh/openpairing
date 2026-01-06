@@ -111,7 +111,7 @@ func (c *Client) downloadFile(url, filename string) (*DownloadResult, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/openpairing/openpairing)")
+	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/tranmh/openpairing)")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

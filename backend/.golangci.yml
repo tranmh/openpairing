@@ -61,7 +61,7 @@ linters-settings:
     max-func-lines: 30
 
   goimports:
-    local-prefixes: github.com/openpairing/openpairing
+    local-prefixes: github.com/tranmh/openpairing
 
 issues:
   exclude-rules:

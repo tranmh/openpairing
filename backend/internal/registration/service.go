@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	"github.com/openpairing/openpairing/internal/tournament"
+	"github.com/tranmh/openpairing/internal/tournament"
 )
 
 // Service provides registration business logic

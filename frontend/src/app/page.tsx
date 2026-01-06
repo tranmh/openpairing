@@ -173,7 +173,7 @@ export default function HomePage() {
               <h4 className="text-sm font-semibold">Ressourcen</h4>
               <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
                 <li>
-                  <a href="https://github.com/openpairing/openpairing">GitHub</a>
+                  <a href="https://github.com/tranmh/openpairing">GitHub</a>
                 </li>
                 <li>
                   <Link href="/api">API</Link>

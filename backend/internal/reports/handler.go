@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/openpairing/openpairing/pkg/response"
+	"github.com/tranmh/openpairing/pkg/response"
 	"github.com/rs/zerolog"
 )
 

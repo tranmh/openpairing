@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/openpairing/openpairing/internal/config"
+	"github.com/tranmh/openpairing/internal/config"
 )
 
 // CORS returns a CORS middleware

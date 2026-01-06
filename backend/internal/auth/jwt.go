@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/openpairing/openpairing/internal/config"
+	"github.com/tranmh/openpairing/internal/config"
 )
 
 var (

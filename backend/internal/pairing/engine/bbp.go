@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openpairing/openpairing/internal/pairing/trf"
+	"github.com/tranmh/openpairing/internal/pairing/trf"
 	"github.com/rs/zerolog"
 )
 

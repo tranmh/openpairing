@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/openpairing/openpairing/pkg/response"
+	"github.com/tranmh/openpairing/pkg/response"
 )
 
 // RateLimiter implements a simple in-memory rate limiter

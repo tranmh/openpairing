@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/openpairing/openpairing/internal/pairing/engine"
+	"github.com/tranmh/openpairing/internal/pairing/engine"
 )
 
 // Re-export types from engine package for convenience

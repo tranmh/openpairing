@@ -4,8 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/openpairing/openpairing/pkg/response"
-	"github.com/openpairing/openpairing/pkg/validator"
+	"github.com/tranmh/openpairing/pkg/response"
+	"github.com/tranmh/openpairing/pkg/validator"
 )
 
 // Handler handles authentication HTTP requests

@@ -9,8 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/openpairing/openpairing/internal/federation/portal64"
-	"github.com/openpairing/openpairing/internal/player"
+	"github.com/tranmh/openpairing/internal/federation/portal64"
+	"github.com/tranmh/openpairing/internal/player"
 	"github.com/rs/zerolog"
 )
 

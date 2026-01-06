@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/openpairing/openpairing/internal/player"
-	"github.com/openpairing/openpairing/internal/tournament"
+	"github.com/tranmh/openpairing/internal/player"
+	"github.com/tranmh/openpairing/internal/tournament"
 	"github.com/rs/zerolog"
 )
 

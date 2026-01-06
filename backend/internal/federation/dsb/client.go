@@ -109,7 +109,7 @@ func (c *Client) GetPlayer(ctx context.Context, pkz string) (*DSBPlayer, error) 
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/openpairing/openpairing)")
+	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/tranmh/openpairing)")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -151,7 +151,7 @@ func (c *Client) GetPlayerCSV(ctx context.Context, pkz string) (*DSBPlayer, erro
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/openpairing/openpairing)")
+	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/tranmh/openpairing)")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -253,7 +253,7 @@ func (c *Client) SearchPlayers(ctx context.Context, query string, limit int) ([]
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/openpairing/openpairing)")
+	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/tranmh/openpairing)")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -353,7 +353,7 @@ func (c *Client) GetClub(ctx context.Context, zps string) (*DSBClub, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/openpairing/openpairing)")
+	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/tranmh/openpairing)")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -396,7 +396,7 @@ func (c *Client) GetClubMembers(ctx context.Context, zps string) ([]*DSBPlayer, 
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/openpairing/openpairing)")
+	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/tranmh/openpairing)")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

@@ -3,7 +3,7 @@ package engine
 import (
 	"context"
 
-	"github.com/openpairing/openpairing/internal/pairing/trf"
+	"github.com/tranmh/openpairing/internal/pairing/trf"
 )
 
 // PairingEngine is the interface for pairing engines

@@ -102,7 +102,7 @@ func (c *Client) GetPlayer(ctx context.Context, id string) (*Player, error) {
 	}
 
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/openpairing/openpairing)")
+	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/tranmh/openpairing)")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -161,7 +161,7 @@ func (c *Client) SearchPlayers(ctx context.Context, query string, limit int) ([]
 	}
 
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/openpairing/openpairing)")
+	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/tranmh/openpairing)")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -218,7 +218,7 @@ func (c *Client) GetClubPlayers(ctx context.Context, clubID string, limit int) (
 	}
 
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/openpairing/openpairing)")
+	req.Header.Set("User-Agent", "OpenPairing/1.0 (+https://github.com/tranmh/openpairing)")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

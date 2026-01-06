@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"github.com/openpairing/openpairing/internal/chess"
+	"github.com/tranmh/openpairing/internal/chess"
 	"github.com/rs/zerolog"
 )
 
