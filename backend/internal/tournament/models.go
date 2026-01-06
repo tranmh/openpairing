@@ -62,6 +62,7 @@ const (
 	EngineMonrad     PairingEngine = "monrad"
 	EngineKeizer     PairingEngine = "keizer"
 	EngineArena      PairingEngine = "arena"
+	EngineWAM        PairingEngine = "wam"
 )
 
 // PairingSystem represents the pairing system
@@ -1153,7 +1154,7 @@ type CreateTournamentRequest struct {
 	Mode               TournamentMode  `json:"mode" binding:"required,oneof=otb online hybrid"`
 	TimeControl        string          `json:"timeControl" binding:"required"`
 	TimeControlType    TimeControlType `json:"timeControlType" binding:"required,oneof=standard rapid blitz"`
-	PairingEngine      PairingEngine   `json:"pairingEngine" binding:"omitempty,oneof=javafo bbp round_robin knockout team_swiss monrad keizer arena"`
+	PairingEngine      PairingEngine   `json:"pairingEngine" binding:"omitempty,oneof=javafo bbp round_robin knockout team_swiss monrad keizer arena wam"`
 	PairingSystem      PairingSystem   `json:"pairingSystem,omitempty"`
 	AcceleratedPairing bool            `json:"acceleratedPairing"`
 	Rounds             int             `json:"rounds" binding:"required,min=1,max=15"`

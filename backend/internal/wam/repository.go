@@ -776,7 +776,7 @@ func (r *PostgresRepository) GetTournamentParticipants(ctx context.Context, tour
 		FROM tournament_participants tp
 		JOIN players p ON tp.player_id = p.id
 		LEFT JOIN clubs c ON p.club_id = c.id
-		WHERE tp.tournament_id = $1 AND tp.status = 'active'
+		WHERE tp.tournament_id = $1 AND tp.is_active = TRUE
 		ORDER BY (COALESCE(tp.starting_rating, p.dwz, 0) + COALESCE(tp.joker_points, 0)) DESC
 	`, tournamentID)
 	if err != nil {
