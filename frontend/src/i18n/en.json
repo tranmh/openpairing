@@ -87,6 +87,7 @@
     }
   },
   "nav": {
+    "home": "Home",
     "dashboard": "Dashboard",
     "tournaments": "Tournaments",
     "players": "Players",

@@ -87,6 +87,7 @@
     }
   },
   "nav": {
+    "home": "Startseite",
     "dashboard": "Dashboard",
     "tournaments": "Turniere",
     "players": "Spieler",

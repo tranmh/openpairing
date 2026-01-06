@@ -22,25 +22,25 @@ export default function DashboardPage() {
           title="Aktive Turniere"
           value="0"
           description="Turniere in denen Sie teilnehmen"
-          href="/dashboard/tournaments"
+          href="/tournaments"
         />
         <StatCard
           title="Gespielte Partien"
           value="0"
           description="Gesamtzahl Ihrer Partien"
-          href="/dashboard/games"
+          href="/tournaments"
         />
         <StatCard
           title="Aktuelle Wertung"
           value="-"
           description="Ihre höchste Wertungszahl"
-          href="/dashboard/profile"
+          href="/profile"
         />
         <StatCard
           title="Nächste Runde"
           value="-"
           description="Keine anstehenden Partien"
-          href="/dashboard/tournaments"
+          href="/tournaments"
         />
       </div>
 
@@ -49,20 +49,20 @@ export default function DashboardPage() {
         <QuickActionCard
           title="Turnier suchen"
           description="Finden und melden Sie sich für Turniere an"
-          href="/dashboard/tournaments"
+          href="/tournaments"
           icon={SearchIcon}
         />
         <QuickActionCard
           title="Profil bearbeiten"
           description="Aktualisieren Sie Ihre persönlichen Daten"
-          href="/dashboard/profile"
+          href="/profile"
           icon={UserIcon}
         />
         {(user?.role === 'organizer' || user?.role === 'admin') && (
           <QuickActionCard
             title="Turnier erstellen"
             description="Neues Turnier erstellen und verwalten"
-            href="/dashboard/tournaments/new"
+            href="/tournaments/new"
             icon={PlusIcon}
           />
         )}
@@ -70,7 +70,7 @@ export default function DashboardPage() {
           <QuickActionCard
             title="Schiedsrichter-Konsole"
             description="Turniere als Schiedsrichter verwalten"
-            href="/dashboard/arbiter"
+            href="/tournaments"
             icon={ClipboardIcon}
           />
         )}
@@ -85,7 +85,7 @@ export default function DashboardPage() {
           </div>
           <p className="mt-4 text-muted-foreground">Noch keine Aktivitäten vorhanden</p>
           <Link
-            href="/dashboard/tournaments"
+            href="/tournaments"
             className="mt-4 text-sm font-medium text-primary hover:underline"
           >
             Erstes Turnier finden →

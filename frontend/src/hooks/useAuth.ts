@@ -72,7 +72,7 @@ export function useRedirectIfAuthenticated(redirectTo: string = '/tournaments') 
 /**
  * Hook to check if user has required role
  */
-export function useRequireRole(allowedRoles: string[], redirectTo: string = '/dashboard') {
+export function useRequireRole(allowedRoles: string[], redirectTo: string = '/tournaments') {
   const router = useRouter();
   const { user, isAuthenticated, isLoading, isHydrated } = useAuthStore();
 
