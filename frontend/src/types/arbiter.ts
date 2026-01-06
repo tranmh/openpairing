@@ -39,6 +39,8 @@ export interface ParticipantInfo {
   id: string;
   playerId: string;
   playerName?: string;
+  playerFirstName?: string;
+  playerLastName?: string;
   startRank: number;
   startingRating: number;
   manualRatingOverride?: number | null;

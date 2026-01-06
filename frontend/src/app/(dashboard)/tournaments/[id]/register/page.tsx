@@ -30,7 +30,8 @@ interface Tournament {
 interface Participant {
   id: string;
   playerId: string;
-  playerName?: string;
+  playerFirstName?: string;
+  playerLastName?: string;
   startingRating: number;
   isActive: boolean;
 }
@@ -272,7 +273,7 @@ export default function RegisterPlayerPage() {
                   .filter(p => p.isActive)
                   .map((p) => (
                     <div key={p.id} className="p-3 flex justify-between items-center">
-                      <span className="font-medium">{p.playerName || p.playerId}</span>
+                      <span className="font-medium">{p.playerLastName && p.playerFirstName ? `${p.playerLastName}, ${p.playerFirstName}` : p.playerId}</span>
                       <span className="text-muted-foreground">{p.startingRating}</span>
                     </div>
                   ))}

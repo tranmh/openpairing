@@ -263,6 +263,11 @@ export interface TournamentParticipant {
   draws: number;
   losses: number;
   isActive: boolean;
+  // Player info from join
+  playerFirstName?: string;
+  playerLastName?: string;
+  playerFideId?: string;
+  playerClubName?: string;
 }
 
 export interface Game {

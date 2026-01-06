@@ -56,10 +56,12 @@ export function ParticipantsTab({ tournamentId, participants }: ParticipantsTabP
                 </tr>
               </thead>
               <tbody>
-                {activeParticipants.map((p) => (
+                {activeParticipants.map((p) => {
+                  const displayName = p.playerName || (p.playerLastName && p.playerFirstName ? `${p.playerLastName}, ${p.playerFirstName}` : p.playerId);
+                  return (
                   <tr key={p.id} className="border-b">
                     <td className="text-center py-2 px-2">{p.startRank}</td>
-                    <td className="py-2 px-2">{p.playerName || p.playerId}</td>
+                    <td className="py-2 px-2">{displayName}</td>
                     <td className="text-right py-2 px-2">{p.startingRating}</td>
                     <td className="text-right py-2 px-2">{p.points}</td>
                     <td className="py-2 px-2 flex justify-center gap-1">
@@ -67,7 +69,7 @@ export function ParticipantsTab({ tournamentId, participants }: ParticipantsTabP
                       <RatingOverrideDialog
                         tournamentId={tournamentId}
                         participantId={p.id}
-                        playerName={p.playerName || p.playerId}
+                        playerName={displayName}
                         currentRating={p.startingRating}
                         hasOverride={p.manualRatingOverride !== null && p.manualRatingOverride !== undefined}
                       />
@@ -111,7 +113,8 @@ export function ParticipantsTab({ tournamentId, participants }: ParticipantsTabP
                       </Dialog>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -138,21 +141,24 @@ export function ParticipantsTab({ tournamentId, participants }: ParticipantsTabP
                   </tr>
                 </thead>
                 <tbody>
-                  {withdrawnParticipants.map((p) => (
+                  {withdrawnParticipants.map((p) => {
+                    const displayName = p.playerName || (p.playerLastName && p.playerFirstName ? `${p.playerLastName}, ${p.playerFirstName}` : p.playerId);
+                    return (
                     <tr key={p.id} className="border-b opacity-60 hover:opacity-100">
                       <td className="text-center py-2 px-2">{p.startRank}</td>
-                      <td className="py-2 px-2">{p.playerName || p.playerId}</td>
+                      <td className="py-2 px-2">{displayName}</td>
                       <td className="text-right py-2 px-2">{p.startingRating}</td>
                       <td className="text-right py-2 px-2">{p.points}</td>
                       <td className="py-2 px-2">
                         <ReactivatePlayerDialog
                           tournamentId={tournamentId}
                           participantId={p.id}
-                          playerName={p.playerName || p.playerId}
+                          playerName={displayName}
                         />
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

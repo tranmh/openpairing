@@ -94,7 +94,8 @@ interface Participant {
   points: number;
   buchholz: number;
   isActive: boolean;
-  playerName?: string;
+  playerFirstName?: string;
+  playerLastName?: string;
 }
 
 interface Round {
@@ -613,7 +614,7 @@ function ParticipantsTab({
                   .map((p) => (
                     <tr key={p.id} className="border-b">
                       <td className="py-2 px-2">{p.startRank}</td>
-                      <td className="py-2 px-2">{p.playerName || p.playerId}</td>
+                      <td className="py-2 px-2">{p.playerLastName && p.playerFirstName ? `${p.playerLastName}, ${p.playerFirstName}` : p.playerId}</td>
                       <td className="py-2 px-2 text-right">{p.startingRating}</td>
                       <td className="py-2 px-2 text-right">{p.points ?? 0}</td>
                       <td className="py-2 px-2 text-right">{p.buchholz?.toFixed(1) ?? '-'}</td>
@@ -936,7 +937,7 @@ function StandingsTab({ tournamentId }: { tournamentId: string }) {
                 {standings.map((p: Participant, i: number) => (
                   <tr key={p.id} className="border-b">
                     <td className="py-2 px-2 text-center">{i + 1}</td>
-                    <td className="py-2 px-2">{p.playerName || p.playerId}</td>
+                    <td className="py-2 px-2">{p.playerLastName && p.playerFirstName ? `${p.playerLastName}, ${p.playerFirstName}` : p.playerId}</td>
                     <td className="py-2 px-2 text-right">{p.startingRating}</td>
                     <td className="py-2 px-2 text-right font-medium">{p.points ?? 0}</td>
                     <td className="py-2 px-2 text-right">{p.buchholz?.toFixed(1) ?? '-'}</td>
