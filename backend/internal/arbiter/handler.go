@@ -85,10 +85,12 @@ func (h *Handler) GetTournamentStatus(c *gin.Context) {
 		return
 	}
 
-	userID, _ := c.Get("user_id")
-	arbiterID, _ := userID.(uuid.UUID)
+	userIDStr, _ := c.Get("user_id")
+	arbiterID, _ := uuid.Parse(userIDStr.(string))
+	userRole, _ := c.Get("user_role")
+	role, _ := userRole.(string)
 
-	status, err := h.service.GetTournamentStatus(c.Request.Context(), id, arbiterID)
+	status, err := h.service.GetTournamentStatusWithRole(c.Request.Context(), id, arbiterID, role)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to get tournament status")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -38,6 +38,22 @@ func NewService(tournamentRepo tournament.Repository, playerRepo player.Reposito
 
 // canManageTournament checks if the arbiter has permission to manage the tournament
 func (s *Service) canManageTournament(ctx context.Context, tournamentID, arbiterID uuid.UUID) error {
+	return s.canManageTournamentWithRole(ctx, tournamentID, arbiterID, "")
+}
+
+// canManageTournamentWithRole checks if the user has permission to manage the tournament
+// considering their role
+func (s *Service) canManageTournamentWithRole(ctx context.Context, tournamentID, arbiterID uuid.UUID, userRole string) error {
+	// Users with organizer or admin role can manage any tournament
+	if userRole == "organizer" || userRole == "admin" {
+		// Verify the tournament exists
+		_, err := s.tournamentRepo.GetByID(ctx, tournamentID)
+		if err != nil {
+			return fmt.Errorf("tournament not found: %w", err)
+		}
+		return nil
+	}
+
 	tourney, err := s.tournamentRepo.GetByID(ctx, tournamentID)
 	if err != nil {
 		return fmt.Errorf("tournament not found: %w", err)
@@ -60,7 +76,6 @@ func (s *Service) canManageTournament(ctx context.Context, tournamentID, arbiter
 	}
 
 	// If no repo or checks failed, deny access
-	// In a production system, you might want to allow site admins here
 	return fmt.Errorf("arbiter not authorized for this tournament")
 }
 
@@ -119,8 +134,13 @@ type TournamentStatistics struct {
 
 // GetTournamentStatus gets the current tournament status for the arbiter console
 func (s *Service) GetTournamentStatus(ctx context.Context, tournamentID uuid.UUID, arbiterID uuid.UUID) (*TournamentStatus, error) {
-	// Verify arbiter has permission for this tournament
-	if err := s.canManageTournament(ctx, tournamentID, arbiterID); err != nil {
+	return s.GetTournamentStatusWithRole(ctx, tournamentID, arbiterID, "")
+}
+
+// GetTournamentStatusWithRole gets the current tournament status with role-based authorization
+func (s *Service) GetTournamentStatusWithRole(ctx context.Context, tournamentID uuid.UUID, arbiterID uuid.UUID, userRole string) (*TournamentStatus, error) {
+	// Verify user has permission for this tournament (considering role)
+	if err := s.canManageTournamentWithRole(ctx, tournamentID, arbiterID, userRole); err != nil {
 		return nil, err
 	}
 
