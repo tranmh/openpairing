@@ -2,6 +2,10 @@
 
 A modern chess tournament management platform for the DACH region (Germany, Austria, Switzerland).
 
+## LIVE
+
+[https://openpairing.org/](https://openpairing.org/)
+
 ## Features
 
 - **Tournament Management**: Swiss, Round Robin, Knockout, Team Swiss, Arena formats
