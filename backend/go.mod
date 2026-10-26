@@ -1,6 +1,6 @@
 module github.com/tranmh/openpairing
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
@@ -12,7 +12,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/notnil/chess v1.9.0
 	github.com/rs/zerolog v1.31.0
-	golang.org/x/crypto v0.31.0
+	golang.org/x/crypto v0.57.0
 )
 
 require (
@@ -43,10 +43,10 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.11 // indirect
 	golang.org/x/arch v0.3.0 // indirect
-	golang.org/x/net v0.25.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/text v0.29.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
