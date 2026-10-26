@@ -8,6 +8,131 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// crosstableCountingRepository serves a complete round robin and counts round lookups
+type crosstableCountingRepository struct {
+	Repository
+	tournament   *Tournament
+	participants []Participant
+	rounds       []Round
+	games        []Game
+	getRoundCalls int
+}
+
+func newCrosstableCountingRepository(players, rounds int) *crosstableCountingRepository {
+	t := &Tournament{ID: uuid.New(), Name: "Crosstable", Rounds: rounds}
+	m := &crosstableCountingRepository{tournament: t}
+	for i := 0; i < players; i++ {
+		m.participants = append(m.participants, Participant{ID: uuid.New(), TournamentID: t.ID})
+	}
+	for r := 1; r <= rounds; r++ {
+		round := Round{ID: uuid.New(), TournamentID: t.ID, RoundNumber: r}
+		m.rounds = append(m.rounds, round)
+		for i := 0; i+1 < players; i += 2 {
+			white := m.participants[(i+r)%players].ID
+			black := m.participants[(i+r+1)%players].ID
+			one, zero := 1.0, 0.0
+			m.games = append(m.games, Game{ID: uuid.New(), TournamentID: t.ID, RoundID: round.ID,
+				WhiteParticipantID: &white, BlackParticipantID: &black, WhiteScore: &one, BlackScore: &zero})
+		}
+	}
+	return m
+}
+
+func (m *crosstableCountingRepository) GetByID(ctx context.Context, id uuid.UUID) (*Tournament, error) {
+	return m.tournament, nil
+}
+
+func (m *crosstableCountingRepository) GetStandings(ctx context.Context, tournamentID uuid.UUID) ([]Participant, error) {
+	return m.participants, nil
+}
+
+func (m *crosstableCountingRepository) GetRound(ctx context.Context, id uuid.UUID) (*Round, error) {
+	m.getRoundCalls++
+	for i := range m.rounds {
+		if m.rounds[i].ID == id {
+			return &m.rounds[i], nil
+		}
+	}
+	return nil, ErrRoundNotFound
+}
+
+func (m *crosstableCountingRepository) ListRounds(ctx context.Context, tournamentID uuid.UUID) ([]Round, error) {
+	return m.rounds, nil
+}
+
+func (m *crosstableCountingRepository) ListGamesByTournament(ctx context.Context, tournamentID uuid.UUID) ([]Game, error) {
+	return m.games, nil
+}
+
+func (m *crosstableCountingRepository) GetPlayerGames(ctx context.Context, tournamentID, participantID uuid.UUID) ([]Game, error) {
+	var games []Game
+	for _, g := range m.games {
+		if (g.WhiteParticipantID != nil && *g.WhiteParticipantID == participantID) ||
+			(g.BlackParticipantID != nil && *g.BlackParticipantID == participantID) {
+			games = append(games, g)
+		}
+	}
+	return games, nil
+}
+
+func TestGetCrosstable_RoundLookupsDoNotGrowWithPlayers(t *testing.T) {
+	t.Skip("aqaa: open bug, see report")
+	countGetRound := func(players int) int {
+		repo := newCrosstableCountingRepository(players, 5)
+		service := NewService(repo, nil, zerolog.Nop())
+		if _, err := service.GetCrosstable(context.Background(), repo.tournament.ID); err != nil {
+			t.Fatalf("GetCrosstable: %v", err)
+		}
+		return repo.getRoundCalls
+	}
+
+	small := countGetRound(10)
+	large := countGetRound(20)
+	if large > small {
+		t.Errorf("GetRound calls grew with the number of players: %d for 10 players, %d for 20 players (rounds should be loaded once)", small, large)
+	}
+}
+
+// tiebreakCountingRepository counts per-player game lookups during tiebreak recalculation
+type tiebreakCountingRepository struct {
+	*crosstableCountingRepository
+	getPlayerGamesCalls int
+}
+
+func (m *tiebreakCountingRepository) ListParticipants(ctx context.Context, tournamentID uuid.UUID) ([]Participant, error) {
+	return m.participants, nil
+}
+
+func (m *tiebreakCountingRepository) UpdateParticipant(ctx context.Context, p *Participant) error {
+	return nil
+}
+
+func (m *tiebreakCountingRepository) GetPlayerGames(ctx context.Context, tournamentID, participantID uuid.UUID) ([]Game, error) {
+	m.getPlayerGamesCalls++
+	return m.crosstableCountingRepository.GetPlayerGames(ctx, tournamentID, participantID)
+}
+
+func TestRecalculateTiebreaks_GameLookupsDoNotGrowWithPlayers(t *testing.T) {
+	t.Skip("aqaa: open bug, see report")
+	countGetPlayerGames := func(players int) int {
+		repo := &tiebreakCountingRepository{crosstableCountingRepository: newCrosstableCountingRepository(players, 5)}
+		for i := range repo.participants {
+			repo.participants[i].IsActive = true
+		}
+		service := NewService(repo, nil, zerolog.Nop())
+		if err := service.RecalculateTiebreaks(context.Background(), repo.tournament.ID); err != nil {
+			t.Fatalf("RecalculateTiebreaks: %v", err)
+		}
+		return repo.getPlayerGamesCalls
+	}
+
+	small := countGetPlayerGames(25)
+	large := countGetPlayerGames(50)
+	if large > small {
+		t.Errorf("GetPlayerGames calls grew with the number of players: %d for 25 players, %d for 50 players (games should be loaded once)", small, large)
+	}
+}
+
 // MockSeatingRepository extends the mock for seating chart tests
 type MockSeatingRepository struct {
 	tournaments  map[uuid.UUID]*Tournament
