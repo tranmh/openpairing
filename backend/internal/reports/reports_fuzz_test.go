@@ -28,6 +28,17 @@ func FuzzGetExpectedScore(f *testing.F) {
 	})
 }
 
+// Regression for fuzz finding F1 (seed#7): the expected score must not go
+// down from a rating difference of 799 to 800.
+func TestGetExpectedScoreMonotonicAt799(t *testing.T) {
+	c := NewNormCalculator()
+	d := 799
+	e := c.getExpectedScore(d)
+	if next := c.getExpectedScore(d + 1); next < e {
+		t.Errorf("getExpectedScore not monotonic: f(%d) = %v > f(%d) = %v", d, e, d+1, next)
+	}
+}
+
 // FuzzCalculatePerformance: for results in [0, 1] the performance stays
 // within 800 points of the average opponent rating.
 func FuzzCalculatePerformance(f *testing.F) {
