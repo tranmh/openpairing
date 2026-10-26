@@ -224,9 +224,9 @@ install_golang() {
         return
     fi
 
-    log_info "Installing Go 1.22..."
+    log_info "Installing Go 1.25..."
 
-    GO_VERSION="1.22.5"
+    GO_VERSION="1.25.0"
     wget -q "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -O /tmp/go.tar.gz
     rm -rf /usr/local/go
     tar -C /usr/local -xzf /tmp/go.tar.gz

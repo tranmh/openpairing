@@ -2,6 +2,7 @@ package auth
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tranmh/openpairing/pkg/response"
@@ -16,6 +17,12 @@ type Handler struct {
 // NewHandler creates a new auth handler
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+// isHTTPS reports whether the client connection is HTTPS, either directly or
+// through a TLS-terminating proxy
+func isHTTPS(c *gin.Context) bool {
+	return c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
 }
 
 // setSecureCookie sets a cookie with proper security attributes including SameSite
@@ -127,7 +134,7 @@ func (h *Handler) Login(c *gin.Context) {
 	}
 
 	// Set refresh token as HTTP-only cookie with SameSite protection
-	setSecureCookie(c, "refresh_token", tokens.RefreshToken, 60*60*24*7, "/", c.Request.TLS != nil, true)
+	setSecureCookie(c, "refresh_token", tokens.RefreshToken, 60*60*24*7, "/", isHTTPS(c), true)
 
 	response.Success(c, http.StatusOK, gin.H{
 		"user":        user,
@@ -149,7 +156,7 @@ func (h *Handler) Logout(c *gin.Context) {
 	}
 
 	// Clear the refresh token cookie with SameSite protection
-	setSecureCookie(c, "refresh_token", "", -1, "/", c.Request.TLS != nil, true)
+	setSecureCookie(c, "refresh_token", "", -1, "/", isHTTPS(c), true)
 	response.NoContent(c)
 }
 
@@ -172,7 +179,7 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 		switch err {
 		case ErrInvalidToken, ErrExpiredToken, ErrTokenRevoked:
 			// Clear invalid cookie with SameSite protection
-			setSecureCookie(c, "refresh_token", "", -1, "/", c.Request.TLS != nil, true)
+			setSecureCookie(c, "refresh_token", "", -1, "/", isHTTPS(c), true)
 			response.Unauthorized(c, "Invalid or expired refresh token")
 		default:
 			response.InternalServerError(c, "Failed to refresh token")
@@ -181,7 +188,7 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 	}
 
 	// Update refresh token cookie with SameSite protection
-	setSecureCookie(c, "refresh_token", tokens.RefreshToken, 60*60*24*7, "/", c.Request.TLS != nil, true)
+	setSecureCookie(c, "refresh_token", tokens.RefreshToken, 60*60*24*7, "/", isHTTPS(c), true)
 
 	response.Success(c, http.StatusOK, gin.H{
 		"user":        user,

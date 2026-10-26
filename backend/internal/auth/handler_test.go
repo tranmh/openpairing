@@ -439,6 +439,32 @@ func TestHandler_Logout(t *testing.T) {
 	})
 }
 
+// The API server listens on plain HTTP behind a TLS-terminating proxy, so the
+// refresh_token cookie must be Secure when the proxy reports HTTPS.
+func TestRefreshCookieIsSecureBehindTLSProxy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil)
+	router := gin.New()
+	router.POST("/auth/logout", handler.Logout)
+
+	req := httptest.NewRequest("POST", "/auth/logout", nil)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	var refreshCookie *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == "refresh_token" {
+			refreshCookie = c
+			break
+		}
+	}
+	require.NotNil(t, refreshCookie)
+	assert.True(t, refreshCookie.HttpOnly)
+	assert.True(t, refreshCookie.Secure, "refresh_token cookie must be Secure behind an HTTPS proxy")
+}
+
 func TestHandler_RefreshToken(t *testing.T) {
 	t.Run("successful token refresh", func(t *testing.T) {
 		mockService := &MockAuthService{
