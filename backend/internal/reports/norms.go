@@ -195,8 +195,11 @@ func (c *NormCalculator) getExpectedScore(ratingDiff int) float64 {
 		ratingDiff = -ratingDiff
 	}
 
-	// Round to nearest 10
+	// Round down to the table step: 10 up to 400, 100 above
 	rounded := (ratingDiff / 10) * 10
+	if ratingDiff > 400 {
+		rounded = (ratingDiff / 100) * 100
+	}
 
 	prob, ok := c.probabilityTable[rounded*sign]
 	if ok {
