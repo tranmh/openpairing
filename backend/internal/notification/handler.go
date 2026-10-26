@@ -256,18 +256,13 @@ func (h *Handler) SendNotification(c *gin.Context) {
 // getUserIDFromContext extracts user ID from the Gin context
 func getUserIDFromContext(c *gin.Context) (uuid.UUID, error) {
 	// Try to get from context (set by auth middleware)
-	if userID, exists := c.Get("userID"); exists {
+	if userID, exists := c.Get("user_id"); exists {
 		if id, ok := userID.(uuid.UUID); ok {
 			return id, nil
 		}
 		if idStr, ok := userID.(string); ok {
 			return uuid.Parse(idStr)
 		}
-	}
-
-	// Fallback: try to get from header (for testing)
-	if userIDStr := c.GetHeader("X-User-ID"); userIDStr != "" {
-		return uuid.Parse(userIDStr)
 	}
 
 	return uuid.Nil, http.ErrNoCookie
