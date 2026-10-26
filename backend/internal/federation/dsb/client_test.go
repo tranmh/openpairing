@@ -234,3 +234,13 @@ func TestConvertToPlayer(t *testing.T) {
 		t.Errorf("Gender = %q, want %q", *player.Gender, "m")
 	}
 }
+
+func TestConvertToPlayer_NoBirthYear(t *testing.T) {
+	importer := &Importer{}
+
+	player := importer.convertToPlayer(&DSBPlayer{PKZ: "10012345", BirthYear: 0})
+
+	if player.BirthDate != nil {
+		t.Errorf("BirthDate = %q, want nil", *player.BirthDate)
+	}
+}
