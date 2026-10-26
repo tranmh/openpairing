@@ -393,3 +393,97 @@ func TestGenerator_XXCRecords(t *testing.T) {
 		t.Errorf("Output should contain XXC initial")
 	}
 }
+
+func TestBaseGenerator_PlayerLineExactWidths(t *testing.T) {
+	g := newBaseGenerator()
+	name := strings.Repeat("N", 33)
+
+	line := g.generatePlayerLine(TRFPlayer{
+		StartNo:    1,
+		Title:      "IGM",
+		Name:       name,
+		Rating:     0,
+		Federation: "GER",
+		FideID:     "12345678901",
+		BirthDate:  "1990/11/30",
+	})
+
+	expected := "001    1  IGM " + name + "      GER 12345678901 1990/11/30  0.0    0  "
+	if line != expected {
+		t.Errorf("line =\n%q, want\n%q", line, expected)
+	}
+}
+
+func TestBaseGenerator_PlayerLineRating(t *testing.T) {
+	tests := []struct {
+		name   string
+		rating int
+		want   string
+	}{
+		{"unrated", 0, "    "},
+		{"rated one", 1, "   1"},
+		{"rated", 2830, "2830"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := newBaseGenerator()
+			line := g.generatePlayerLine(TRFPlayer{StartNo: 1, Name: "Player", Rating: tt.rating})
+			if got := line[48:52]; got != tt.want {
+				t.Errorf("rating field = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBaseGenerator_RoundResultExact(t *testing.T) {
+	tests := []struct {
+		name   string
+		result TRFRoundResult
+		want   string
+	}{
+		{"game", TRFRoundResult{OpponentNo: 1, Color: "w", Result: "1"}, "    1 w 1 "},
+		{"game without color", TRFRoundResult{OpponentNo: 7, Result: "0"}, "    7 - 0 "},
+		{"forfeit win without opponent", TRFRoundResult{Color: "w", Result: "+"}, "    0 - + "},
+		{"full-point bye", TRFRoundResult{Color: "w", Result: "F"}, "    0 - + "},
+		{"half-point bye", TRFRoundResult{Color: "w", Result: "H"}, "    0 - H "},
+		{"zero-point bye", TRFRoundResult{Result: "Z"}, "    0 - Z "},
+		{"pairing-allocated bye", TRFRoundResult{Result: "U"}, "    0 - U "},
+		{"unknown without opponent", TRFRoundResult{Result: "X"}, "    0 - Z "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := newBaseGenerator()
+			if got := g.generateRoundResult(tt.result); got != tt.want {
+				t.Errorf("generateRoundResult() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBaseGenerator_TeamLineExact(t *testing.T) {
+	g := newBaseGenerator()
+	got := g.generateTeamLine(TRFTeam{TeamNo: 1, TeamName: "Berlin", PlayerNos: []int{1, 2, 3}})
+	if want := "013    1 Berlin 1 2 3"; got != want {
+		t.Errorf("generateTeamLine() = %q, want %q", got, want)
+	}
+}
+
+func TestJoinStrings(t *testing.T) {
+	tests := []struct {
+		name string
+		strs []string
+		want string
+	}{
+		{"nil", nil, ""},
+		{"empty", []string{}, ""},
+		{"single", []string{"a"}, "a"},
+		{"several", []string{"1", "2", "3"}, "1 2 3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := joinStrings(tt.strs, " "); got != tt.want {
+				t.Errorf("joinStrings(%v) = %q, want %q", tt.strs, got, tt.want)
+			}
+		})
+	}
+}
