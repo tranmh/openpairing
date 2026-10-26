@@ -93,6 +93,45 @@ func TestGetCrosstable_RoundLookupsDoNotGrowWithPlayers(t *testing.T) {
 	}
 }
 
+// tiebreakCountingRepository counts per-player game lookups during tiebreak recalculation
+type tiebreakCountingRepository struct {
+	*crosstableCountingRepository
+	getPlayerGamesCalls int
+}
+
+func (m *tiebreakCountingRepository) ListParticipants(ctx context.Context, tournamentID uuid.UUID) ([]Participant, error) {
+	return m.participants, nil
+}
+
+func (m *tiebreakCountingRepository) UpdateParticipant(ctx context.Context, p *Participant) error {
+	return nil
+}
+
+func (m *tiebreakCountingRepository) GetPlayerGames(ctx context.Context, tournamentID, participantID uuid.UUID) ([]Game, error) {
+	m.getPlayerGamesCalls++
+	return m.crosstableCountingRepository.GetPlayerGames(ctx, tournamentID, participantID)
+}
+
+func TestRecalculateTiebreaks_GameLookupsDoNotGrowWithPlayers(t *testing.T) {
+	countGetPlayerGames := func(players int) int {
+		repo := &tiebreakCountingRepository{crosstableCountingRepository: newCrosstableCountingRepository(players, 5)}
+		for i := range repo.participants {
+			repo.participants[i].IsActive = true
+		}
+		service := NewService(repo, nil, zerolog.Nop())
+		if err := service.RecalculateTiebreaks(context.Background(), repo.tournament.ID); err != nil {
+			t.Fatalf("RecalculateTiebreaks: %v", err)
+		}
+		return repo.getPlayerGamesCalls
+	}
+
+	small := countGetPlayerGames(25)
+	large := countGetPlayerGames(50)
+	if large > small {
+		t.Errorf("GetPlayerGames calls grew with the number of players: %d for 25 players, %d for 50 players (games should be loaded once)", small, large)
+	}
+}
+
 // MockSeatingRepository extends the mock for seating chart tests
 type MockSeatingRepository struct {
 	tournaments  map[uuid.UUID]*Tournament
